@@ -1,12 +1,11 @@
 use crate::config::Config;
 use crate::request::HttpRequestBuilder;
-use crate::utils::HttpHeaders;
-use crate::utils::HttpMethod;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 use std::collections::HashMap;
 use std::io::{self, Read};
 use std::time::Instant;
+use crate::router::*;
 
 const SERVER_TOKEN: Token = Token(0);
 
@@ -17,8 +16,6 @@ enum Status {
     Finish,
 }
 #[derive(Debug)]
-
-/// Represents the state of a connection's lifecycle.
 struct SocketStatus {
     ttl: Instant,
     status: Status,
@@ -27,12 +24,8 @@ struct SocketStatus {
     index_writed: usize,
 }
 
-/// Wraps a TCP stream and its associated state.
-///
-///
-///
-///
-///
+
+
 #[derive(Debug)]
 struct SocketData {
     stream: TcpStream,
@@ -44,18 +37,8 @@ pub struct Server {
     events: Events,
     listeners: HashMap<Token, TcpListener>,
     connections: HashMap<Token, SocketData>,
+    router: Router,
     next_token: usize,
-}
-
-#[derive(Debug)]
-pub struct HttpRequest {
-    pub method: HttpMethod,
-    pub path: String,
-    pub args: HashMap<String, String>,
-    pub headers: HttpHeaders,
-    pub body: Vec<u8>,
-    stream: Option<TcpStream>,
-    pub buffer: Vec<u8>,
 }
 
 impl Server {
@@ -65,7 +48,8 @@ impl Server {
             events: Events::with_capacity(1024),
             listeners: HashMap::new(),
             connections: HashMap::new(),
-            next_token: 1, // Start tokens for connections from 1
+            router: Router::new(),
+            next_token: 1,
         })
     }
 
@@ -133,7 +117,7 @@ impl Server {
                             if let Some(socket_data) = self.connections.get_mut(&token) {
                                 println!("handling");
 
-                                Server::handle(socket_data);
+                                Self::handle(socket_data, &self.router);
                             }
                         }
                     }
@@ -142,7 +126,7 @@ impl Server {
         }
     }
 
-    fn handle(socket_data: &mut SocketData) -> Option<()> {
+    pub fn handle(socket_data: &mut SocketData, router: &Router) -> Option<()> {
         println!("hadnling");
         let status = socket_data.status.as_mut()?;
 
@@ -184,15 +168,24 @@ impl Server {
                         }
                     }
                 }
-                // let request = status.request.get()?;
-                // let keep_alive = request
-                //     .headers
-                //     .get("connection")
-                //     .map(|v| v.to_lowercase() == "keep-alive")
-                //     .unwrap_or(false);
+                let request = status.request.get()?;
+                let keep_alive = request
+                    .headers
+                    .get("connection")
+                    .map(|v| v.to_lowercase() == "keep-alive")
+                    .unwrap_or(false);
 
-                // let mut response = action(request);
-                // if keep_alive {
+                if let Some(h) = router.route(&request.path) {
+                    let response_bytes = h.handle(&request);
+
+                    status.status = Status::Write;
+                    status.index_writed = 0;
+                    // status.response_bytes = response_bytes;
+                } else {
+                    // 404
+                    status.status = Status::Write;
+                    // status.response_bytes = b"HTTP/1.1 404 Not F ound\r\n\r\n".to_vec();
+                } // if keep_alive {
                 //     response
                 //         .base()
                 //         .headers
@@ -205,7 +198,7 @@ impl Server {
                 // } else {
                 //     response.base().headers.insert("Connection", "close");
                 // }
-                // status.status = Status::Write;
+                status.status = Status::Write;
                 // status.response = response;
                 // status.response.set_stream(&socket_data.stream);
             }

@@ -1,10 +1,10 @@
 pub mod cgi;
 pub mod config;
 pub mod error;
+pub mod request;
 pub mod router;
 pub mod server;
 pub mod utils;
-pub mod request;
 
 use server::Server;
 

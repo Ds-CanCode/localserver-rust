@@ -1,11 +1,11 @@
 use crate::utils::HttpHeaders;
 use crate::utils::HttpMethod;
-use std::{cmp::min, collections::HashMap, net::TcpStream, str};
+use std::{cmp::min, collections::HashMap, str};
 
 const MAX_HEADER_SIZE: usize = 1024 * 16;
 const MAX_HEADER_COUNT: usize = 100;
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
@@ -14,7 +14,7 @@ pub struct HttpRequest {
     pub body: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug ,)]
 
 pub struct HttpRequestBuilder {
     request: HttpRequest,
@@ -50,13 +50,13 @@ impl HttpRequestBuilder {
         };
     }
 
-    // /// Returns the built request if parsing is complete.
-    // pub fn get(&self) -> Option<HttpRequest> {
-    //     match self.state {
-    //         State::Finish => Some(self.request),
-    //         _ => None,
-    //     }
-    // }
+    /// Returns the built request if parsing is complete.
+    pub fn get(&self) -> Option<HttpRequest> {
+        match self.state {
+            State::Finish => Some(self.request.clone()),
+            _ => None,
+        }
+    }
 
     pub fn done(&self) -> bool {
         self.state == State::Finish
@@ -108,7 +108,6 @@ impl HttpRequestBuilder {
                     }
                     let line = line.unwrap();
                     if line.is_empty() {
-                        
                         self.state = if self.body_size == 0 && !self.chunked {
                             State::Finish
                         } else {
