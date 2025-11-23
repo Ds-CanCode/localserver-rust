@@ -1,12 +1,33 @@
 servers:
   - host: 127.0.0.1
     ports:
+      - 8080
       - 8081
     error_pages:
       404: "error_pages/404.html"
-    client_max_body_size: 1024 # in kilobytes
+      405: "error_pages/405.html"
+      500: "error_pages/500.html"
+    client_max_body_size: 10485760  # 10MB in bytes
     routes:
       - path: "/"
         methods: ["GET"]
-        root: "/var/www/html"
+        root: "public"
         default_file: "index.html"
+      
+      - path: "/api"
+        methods: ["GET", "POST"]
+        root: "public/api"
+      
+      - path: "/upload"
+        methods: ["POST"]
+        root: "uploads"
+      
+      - path: "/scripts"
+        methods: ["GET", "POST"]
+        root: "scripts"
+        cgi: ".py"
+      
+      - path: "/files"
+        methods: ["GET"]
+        root: "public/files"
+        list_directory: true

@@ -1,12 +1,12 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub servers: Vec<ServerConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub host: String,
     pub ports: Vec<u16>,
@@ -15,7 +15,7 @@ pub struct ServerConfig {
     pub routes: Vec<Route>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Route {
     pub path: String,
     pub methods: Vec<String>,
@@ -32,3 +32,7 @@ pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
     Ok(config)
 }
 
+//Problem: Lines are in the wrong order! You're using config before creating it
+// ✅ Fixed line order - file_content now created BEFORE it's used
+// ✅ Added Clone derive - Needed for passing config around
+// ❌ Your original had: let config: Config = serde_yaml::from_str(&file_content)?; BEFORE let file_content = std::fs::read_to_string(path)?;
