@@ -13,9 +13,9 @@ fn main() {
     println!("Starting server...");
 
     let config = match config::load_config("config.yaml") {
-        Ok(config) => {
+        Ok(cfg) => {
             println!("Configuration loaded successfully!");
-            config
+            cfg
         }
         Err(e) => {
             eprintln!("Failed to load configuration: {}", e);
@@ -24,7 +24,7 @@ fn main() {
     };
 
     let mut server = match Server::new() {
-        Ok(server) => server,
+        Ok(srv) => srv,
         Err(e) => {
             eprintln!("Failed to initialize server: {}", e);
             return;
