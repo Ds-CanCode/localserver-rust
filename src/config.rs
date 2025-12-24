@@ -32,16 +32,10 @@ pub struct Route {
     pub list_directory: Option<bool>,
 }
 
-// ===================================
-// Utilitaire pour calculer indentation
-// ===================================
 fn indent_level(line: &str) -> usize {
     line.chars().take_while(|c| *c == ' ').count()
 }
 
-// ===================================
-// Parser des ports
-// ===================================
 fn parse_ports(lines: &[String], start: usize) -> Result<(Vec<u16>, usize), Box<dyn Error>> {
     let mut ports = Vec::new();
     let mut i = start;
@@ -70,9 +64,7 @@ fn parse_ports(lines: &[String], start: usize) -> Result<(Vec<u16>, usize), Box<
     Ok((ports, i))
 }
 
-// ===================================
-// Parser des error_pages
-// ===================================
+
 fn parse_error_pages(lines: &[String], start: usize) -> Result<(Vec<ErrorPage>, usize), Box<dyn Error>> {
     let mut pages = Vec::new();
     let mut i = start;
@@ -99,9 +91,7 @@ fn parse_error_pages(lines: &[String], start: usize) -> Result<(Vec<ErrorPage>, 
     Ok((pages, i + 1))
 }
 
-// ===================================
-// Parser d'une route
-// ===================================
+
 fn parse_route(lines: &[String], start: usize) -> Result<(Route, usize), Box<dyn Error>> {
     let mut route = Route {
         path: String::new(),
@@ -119,7 +109,6 @@ fn parse_route(lines: &[String], start: usize) -> Result<(Route, usize), Box<dyn
         return Err("Expected route entry".into());
     }
 
-    // La ligne peut contenir directement "path: ..."
     let first_line = lines[i].trim()[1..].trim();
     if !first_line.is_empty() {
         if let Some((key, value)) = first_line.split_once(':') {
@@ -143,7 +132,7 @@ fn parse_route(lines: &[String], start: usize) -> Result<(Route, usize), Box<dyn
     }
     i += 1;
 
-    // Parser les autres champs en dessous
+
     while i < lines.len() && indent_level(&lines[i]) == 8 {
         let line = lines[i].trim();
         if let Some((key, value)) = line.split_once(':') {
@@ -174,9 +163,7 @@ fn parse_route(lines: &[String], start: usize) -> Result<(Route, usize), Box<dyn
     Ok((route, i))
 }
 
-// ===================================
-// Parser d'un serveur
-// ===================================
+
 fn parse_server(lines: &[String], start: usize) -> Result<(ServerConfig, usize), Box<dyn Error>> {
     let mut host = None;
     let mut client_max_body_size = None;
@@ -245,9 +232,7 @@ fn parse_server(lines: &[String], start: usize) -> Result<(ServerConfig, usize),
     ))
 }
 
-// ===================================
-// Fonction principale
-// ===================================
+
 pub fn load_config(path: &str) -> Result<Config, Box<dyn Error>> {
     let content = fs::read_to_string(path)?;
 

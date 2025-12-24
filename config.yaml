@@ -1,5 +1,16 @@
 servers:
-  - host: 127.0.0.1
+  - host: example.com
+    ports:
+      - 8081
+    error_pages:
+      404: "error_pages/404.html"
+    client_max_body_size: 1024 # in kilobytes
+    routes:
+      - path: "/"
+        methods: ["GET"]
+        root: "/var/www/html"
+        default_file: "index.html"
+  - host: test.com
     ports:
       - 8081
     error_pages:
