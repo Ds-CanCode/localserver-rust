@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, ServerConfig};
 use crate::request::HttpRequestBuilder;
 use crate::router::Router;
 use mio::net::{TcpListener, TcpStream};
@@ -6,10 +6,11 @@ use mio::{Events, Interest, Poll, Token};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::time::Instant;
 use std::net::Shutdown;
+use std::time::Instant;
 
-const SERVER_TOKEN: Token = Token(0);
+const LISTENER_TOKEN_START: usize = 0;
+const CONNECTION_TOKEN_START: usize = 10000;
 
 pub trait HttpResponseCommon {
     fn peek(&self) -> &[u8];
@@ -56,15 +57,26 @@ struct SocketStatus {
     response: Option<Box<dyn HttpResponseCommon>>,
 }
 
+// NEW: Track which listener accepted this connection
 struct SocketData {
     stream: TcpStream,
     status: SocketStatus,
+    listener_token: Token, // NEW: Remember which listener this came from
+}
+
+// NEW: Information about a listener and its associated servers
+struct ListenerInfo {
+    listener: TcpListener,
+    host: String,
+    port: u16,
+    servers: Vec<ServerConfig>, // All servers that share this (host, port)
+    default_server_index: usize, // Index into servers vec for default
 }
 
 pub struct Server {
     poll: Poll,
     events: Events,
-    listeners: HashMap<Token, TcpListener>,
+    listeners: HashMap<Token, ListenerInfo>, // CHANGED: Store ListenerInfo instead of TcpListener
     connections: HashMap<Token, SocketData>,
     router: Router,
     next_token: usize,
@@ -78,49 +90,99 @@ impl Server {
             listeners: HashMap::new(),
             connections: HashMap::new(),
             router: Router::new(),
-            next_token: 1,
+            next_token: CONNECTION_TOKEN_START,
         })
     }
 
     pub fn run(&mut self, config: Config) -> io::Result<()> {
-        let server_config = &config.servers[0];
-        let addr = format!("{}:{}", server_config.host, server_config.ports[0])
-            .parse()
-            .unwrap();
+        // Step 1: Group servers by (host, port)
+        let mut listener_map: HashMap<(String, u16), Vec<(usize, ServerConfig)>> = HashMap::new();
 
-        let mut listener = TcpListener::bind(addr)?;
-        self.poll
-            .registry()
-            .register(&mut listener, SERVER_TOKEN, Interest::READABLE)?;
-        self.listeners.insert(SERVER_TOKEN, listener);
+        for (idx, server) in config.servers.iter().enumerate() {
+            for &port in &server.ports {
+                let key = (server.host.clone(), port);
+                listener_map
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .push((idx, server.clone()));
+            }
+        }
 
-        println!("Server listening on {}", addr);
+        // Step 2: Create one listener per unique (host, port)
+        let mut token_counter = LISTENER_TOKEN_START;
+
+        for ((host, port), server_list) in listener_map {
+            println!("Setting up listener on {}:{}... ", host, port);
+            let addr = format!("{}:{}", host, port).parse().unwrap();
+            let mut listener = TcpListener::bind(addr)?;
+            let token = Token(token_counter);
+            token_counter += 1;
+
+            self.poll
+                .registry()
+                .register(&mut listener, token, Interest::READABLE)?;
+
+            // Determine default server: first one marked as default, or first in list
+            let default_idx = server_list
+                .iter()
+                .position(|(_, srv)| srv.default_server)
+                .unwrap_or(0);
+
+            let servers: Vec<ServerConfig> = server_list.into_iter().map(|(_, srv)| srv).collect();
+
+            println!(
+                "Listening on {}:{} with {} server(s)",
+                host,
+                port,
+                servers.len()
+            );
+            for (i, srv) in servers.iter().enumerate() {
+                println!(
+                    "  - {} {}",
+                    srv.server_name,
+                    if i == default_idx { "(default)" } else { "" }
+                );
+            }
+
+            self.listeners.insert(
+                token,
+                ListenerInfo {
+                    listener,
+                    host,
+                    port,
+                    servers,
+                    default_server_index: default_idx,
+                },
+            );
+        }
 
         loop {
             self.poll.poll(&mut self.events, None)?;
 
             for event in self.events.iter() {
-                match event.token() {
-                    SERVER_TOKEN => {
-                        // Accept all incoming connections
-                        let listener = self.listeners.get_mut(&SERVER_TOKEN).unwrap();
+                let token = event.token();
+
+                // Check if this is a listener token
+                if token.0 < CONNECTION_TOKEN_START {
+                    // Accept all incoming connections
+                    if let Some(listener_info) = self.listeners.get_mut(&token) {
                         loop {
-                            match listener.accept() {
+                            match listener_info.listener.accept() {
                                 Ok((mut stream, _)) => {
-                                    let token = Token(self.next_token);
+                                    let conn_token = Token(self.next_token);
                                     self.next_token += 1;
 
                                     self.poll
                                         .registry()
                                         .register(
                                             &mut stream,
-                                            token,
+                                            conn_token,
                                             Interest::READABLE.add(Interest::WRITABLE),
                                         )
                                         .unwrap();
 
                                     self.connections.insert(
-                                        token,
+                                        conn_token,
                                         SocketData {
                                             stream,
                                             status: SocketStatus {
@@ -129,10 +191,14 @@ impl Server {
                                                 request: HttpRequestBuilder::new(),
                                                 response: None,
                                             },
+                                            listener_token: token, // NEW: Track which listener
                                         },
                                     );
 
-                                    println!("Accepted connection {:?}", token);
+                                    println!(
+                                        "Accepted connection {:?} from listener {:?}",
+                                        conn_token, token
+                                    );
                                 }
                                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
                                 Err(e) => {
@@ -142,11 +208,24 @@ impl Server {
                             }
                         }
                     }
-                    token => {
-                        if let Some(socket_data) = self.connections.get_mut(&token) {
-                            if Server::handle(socket_data).is_none() {
-                                let _ = socket_data.stream.shutdown(Shutdown::Both);
-                                self.connections.remove(&token);
+                } else {
+                    // Handle existing connection
+                    if let Some(socket_data) = self.connections.get_mut(&token) {
+                        loop {
+                            // NEW: Pass listener_info for server selection
+                            let listener_info = self.listeners.get(&socket_data.listener_token);
+                            match Server::handle(socket_data, listener_info) {
+                                Some(true) => continue, // State changed, keep going
+                                Some(false) => {
+                                    println!("Would block, waiting for next event.");
+                                    return break;
+                                } // Would block, need event
+                                None => {
+                                    // Done/error
+                                    let _ = socket_data.stream.shutdown(Shutdown::Both);
+                                    self.connections.remove(&token);
+                                    break;
+                                }
                             }
                         }
                     }
@@ -155,7 +234,11 @@ impl Server {
         }
     }
 
-    pub fn handle(socket_data: &mut SocketData) -> Option<()> {
+    // CHANGED: Add listener_info parameter for server selection
+    pub fn handle(
+        socket_data: &mut SocketData,
+        listener_info: Option<&ListenerInfo>,
+    ) -> Option<(bool)> {
         let status_ref = &mut socket_data.status;
 
         match status_ref.status {
@@ -170,17 +253,59 @@ impl Server {
                                 break;
                             }
                         }
-                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Some(()),
+                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            return {
+                                Some(false)
+                            };
+                        }
                         Err(_) => return None,
                     }
                 }
 
-                // Préparer la réponse HTTP
+                // Parse Host header and select the correct server
                 let request = status_ref.request.get()?;
-                let path = if request.path == "/" {
-                    "public/index.html".to_string()
+
+                // Extract hostname from Host header (strip port if present)
+                let hostname = request
+                    .headers
+                    .get("host")
+                    .and_then(|h| h.split(':').next())
+                    .unwrap_or("");
+
+                // Select server based on hostname
+                let selected_server = if let Some(info) = listener_info {
+                    // Try to find a server matching the hostname
+                    let matched = info.servers.iter().find(|s| s.server_name == hostname);
+
+                    if let Some(srv) = matched {
+                        println!(
+                            "Selected server '{}' for Host: {}",
+                            srv.server_name, hostname
+                        );
+                        Some(srv)
+                    } else {
+                        let default = info.servers.get(info.default_server_index);
+                        if let Some(srv) = default {
+                            println!(
+                                "No match for Host: '{}', using default server '{}'",
+                                hostname, srv.server_name
+                            );
+                        }
+                        default
+                    }
                 } else {
-                    format!("public{}", request.path)
+                    None
+                };
+
+                // Use selected server's document root or fallback to "public"
+                let doc_root = selected_server
+                    .and_then(|s| s.root.as_deref())
+                    .unwrap_or("public");
+
+                let path = if request.path == "/" {
+                    format!("{}/index.html", doc_root)
+                } else {
+                    format!("{}{}", doc_root, request.path)
                 };
 
                 let response_bytes = match fs::read(&path) {
@@ -198,11 +323,14 @@ impl Server {
 
                 status_ref.response = Some(Box::new(SimpleResponse::new(response_bytes)));
                 status_ref.status = Status::Write;
-                Some(())
+                println!("Serving path: {} for Host gggggggggg: {}", path, hostname);
+                Some((true))
             }
 
             Status::Write => {
+                println!("Writing response to client...");
                 if let Some(response) = &mut status_ref.response {
+                    println!("Writing response...");
                     loop {
                         let data = response.peek();
                         if data.is_empty() {
@@ -210,7 +338,9 @@ impl Server {
                         }
                         match socket_data.stream.write(data) {
                             Ok(n) => response.next(n),
-                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Some(()),
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                return Some(false);
+                            }
                             Err(_) => return None,
                         }
                     }
@@ -228,15 +358,19 @@ impl Server {
                             status_ref.request = HttpRequestBuilder::new();
                             status_ref.response = None;
                         } else {
+                            println!("Closing connection.");
                             let _ = socket_data.stream.shutdown(Shutdown::Both);
                             return None;
                         }
                     }
                 }
-                Some(())
+                println!("Response written.");
+                Some((true))
             }
 
-            Status::Finish => None,
+            Status::Finish => {
+                return None;
+            }
         }
     }
 }

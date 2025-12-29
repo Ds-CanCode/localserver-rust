@@ -1,23 +1,41 @@
 servers:
-  - host: example.com
+  - server_name: "example.com"
+    host: 127.0.0.1
     ports:
+      - 8080
       - 8081
+    default_server: true
+    root: "public"
+    client_max_body_size: 5000000
     error_pages:
-      404: "error_pages/404.html"
-    client_max_body_size: 1024 # in kilobytes
+      404: "/errors/404.html"
+      500: "/errors/500.html"
     routes:
       - path: "/"
-        methods: ["GET"]
+        methods: ["GET", "POST"]
         root: "/var/www/html"
         default_file: "index.html"
-  - host: test.com
+      
+      - path: "/blog"
+        methods: ["GET"]
+        root: "/var/www/blog"
+        list_directory: true
+      
+      - path: "/api"
+        methods: ["GET", "POST"]
+        redirect: "https://api.example.com"
+      
+      - path: "/cgi-bin"
+        methods: ["GET", "POST"]
+        root: "/var/www/cgi"
+        cgi: ".py"
+
+  - server_name: "blog.example.com"
+    host: 127.0.0.1
     ports:
-      - 8081
-    error_pages:
-      404: "error_pages/404.html"
-    client_max_body_size: 1024 # in kilobytes
+      - 8080
     routes:
       - path: "/"
         methods: ["GET"]
-        root: "/var/www/html"
+        root: "/var/www/blog"
         default_file: "index.html"
