@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
+use crate::utils::{HttpHeaders, HttpMethod};
+
 #[derive(Debug)]
 pub struct HttpRequest {
-    pub method: String,
+    pub method: HttpMethod,
     pub path: String,
     pub version: String,
-    pub headers: HashMap<String, String>,
+    pub headers: HttpHeaders,
 }
 
 #[derive(Debug)]
@@ -16,7 +18,10 @@ pub struct HttpRequestBuilder {
 
 impl HttpRequestBuilder {
     pub fn new() -> Self {
-        Self { buffer: Vec::new(), request: None }
+        Self {
+            buffer: Vec::new(),
+            request: None,
+        }
     }
 
     pub fn append(&mut self, data: Vec<u8>) -> Result<(), &'static str> {
@@ -30,19 +35,21 @@ impl HttpRequestBuilder {
                 if parts.len() != 3 {
                     return Err("Invalid request line");
                 }
-                let mut headers = HashMap::new();
+                let mut headers = HttpHeaders::new();
                 for line in lines {
                     let line = line.trim();
-                    if line.is_empty() { break; }
+                    if line.is_empty() {
+                        break;
+                    }
                     if let Some((key, val)) = line.split_once(":") {
-                        headers.insert(key.to_lowercase(), val.trim().to_string());
+                        headers.insert(key, val);
                     }
                 }
                 self.request = Some(HttpRequest {
-                    method: parts[0].to_string(),
+                    method: HttpMethod::from_str(parts[0]),
                     path: parts[1].to_string(),
                     version: parts[2].to_string(),
-                    headers,
+                    headers: headers,
                 });
             }
         }

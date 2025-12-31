@@ -27,4 +27,8 @@ impl HttpHeaders {
     pub fn remove(&mut self, key: &str) -> Option<String> {
         self.inner.remove(&key.to_ascii_lowercase())
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.inner.iter()
+    }
 }

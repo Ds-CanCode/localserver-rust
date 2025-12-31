@@ -1,6 +1,7 @@
 use crate::config::{Config, Route, ServerConfig};
 use crate::request::HttpRequestBuilder;
 use crate::router::Router;
+use crate::utils::HttpHeaders;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 use std::collections::HashMap;
@@ -133,7 +134,7 @@ fn serve_file_or_404(file_path: &str, error_page_path: &str) -> Vec<u8> {
 }
 
 /// Extracts the hostname from the Host header (strips port if present)
-fn extract_hostname(headers: &HashMap<String, String>) -> &str {
+fn extract_hostname(headers: &HttpHeaders) -> &str {
     headers
         .get("host")
         .and_then(|h| h.split(':').next())
@@ -175,7 +176,7 @@ fn get_error_page_path(server: Option<&ServerConfig>, status_code: u16) -> Strin
                 .find(|ep| ep.code == status_code)
                 .map(|ep| ep.path.clone())
         })
-        .unwrap_or_else(|| format!("./error_pagesfff/{}.html", status_code))
+        .unwrap_or_else(|| format!("./error_pages/{}.html", status_code))
 }
 
 fn find_matching_route<'a>(server: &'a ServerConfig, request_path: &str) -> Option<&'a Route> {
@@ -288,36 +289,24 @@ fn handle_read_state(
     let hostname = extract_hostname(&request.headers);
     let selected_server = listener_info.and_then(|info| select_server(info, hostname));
 
-
-    // Get error page path
-    let error_page_path = get_error_page_path(selected_server, 404);
-
-
-    println!("Processing request: {} {}", request.method, request.path);
     // Find matching route
     let selected_route =
-        selected_server.and_then(|server| find_matching_route(server, &request.path))?;
+        selected_server.and_then(|server| find_matching_route(server, &request.path));
 
-    // Resolve file path
-    let file_path = resolve_file_path(selected_server, selected_route, &request.path);
+    // Check if method is allowed for this route
+    if let Some(route) = selected_route {
+        let method_allowed = route
+            .methods
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(&request.method.to_str()));
 
-    println!(
-        "Handling request for path: {} using file: {}",
-        request.path, file_path
-    );
+        if !method_allowed {
+            // Method not allowed, serve 405
+            // build response and leave it to be written in handle write state
+        }
 
-    // Generate response
-    let response_bytes = serve_file_or_404(&file_path, &error_page_path);
-
-    println!(
-        "Prepared response for {}: {} bytes",
-        request.path,
-        response_bytes.len()
-    );
-
-    // Update state
-    socket_data.status.response = Some(Box::new(SimpleResponse::new(response_bytes)));
-    socket_data.status.status = Status::Write;
+        // match (request.method)
+    }
 
     Some(true)
 }
