@@ -102,7 +102,7 @@ fn parse_route(lines: &[String], start: usize) -> Result<(Route, usize), Box<dyn
     let mut route = Route {
         path: String::new(),
         methods: Vec::new(),
-        root: None,
+        root: "".to_string(),
         default_file: None,
         redirect: None,
         cgi: None,
@@ -140,6 +140,9 @@ fn parse_route(lines: &[String], start: usize) -> Result<(Route, usize), Box<dyn
     if route.methods.is_empty() {
         return Err("Route missing 'methods'".into());
     }
+    if route.root.is_empty() {
+        return Err("Route missing 'root'".into());
+    }
 
     Ok((route, i))
 }
@@ -157,7 +160,7 @@ fn parse_route_field(route: &mut Route, key: &str, value: &str) -> Result<(), Bo
                 .filter(|s| !s.is_empty())
                 .collect();
         }
-        "root" => route.root = Some(value.trim().trim_matches('"').to_string()),
+        "root" => route.root = value.trim().trim_matches('"').to_string(),
         "default_file" => route.default_file = Some(value.trim().trim_matches('"').to_string()),
         "redirect" => route.redirect = Some(value.trim().trim_matches('"').to_string()),
         "cgi" => route.cgi = Some(value.trim().trim_matches('"').to_string()),
@@ -175,7 +178,7 @@ fn parse_server(lines: &[String], start: usize) -> Result<(ServerConfig, usize),
     let mut host = None;
     let mut default_server = false;
     let mut client_max_body_size = None;
-    let mut root = None;
+    let mut root = String::new();
     let mut ports = Vec::new();
     let mut error_pages = Vec::new();
     let mut routes = Vec::new();
@@ -233,7 +236,7 @@ fn parse_server(lines: &[String], start: usize) -> Result<(ServerConfig, usize),
                 i += 1;
             }
             _ if lvl == 4 && line.starts_with("root:") => {
-                root = Some(line[5..].trim().trim_matches('"').to_string());
+                root = line[5..].trim().trim_matches('"').to_string();
                 i += 1;
             }
             _ if lvl == 4 && line == "routes:" => {

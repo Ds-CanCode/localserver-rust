@@ -204,8 +204,8 @@ fn resolve_file_path(
     route: &crate::config::Route,
     request_path: &str,
 ) -> String {
-    let server_root = server.root.as_deref().unwrap_or(".");
-    let route_root = route.root.as_deref().unwrap_or("");
+    let server_root = server.root.clone();
+    let route_root = route.root.clone();
     let base = format!("{}/{}", server_root, route_root);
 
     if request_path == route.path {

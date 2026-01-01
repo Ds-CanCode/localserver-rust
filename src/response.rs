@@ -173,9 +173,7 @@ pub fn handle_get(request_path: &str, server: &ServerConfig) -> Vec<u8> {
     if let Some(route) = server.routes.iter().find(|r| r.path == request_path) {
         // Directory listing allowed?
         if route.list_directory == Some(true) {
-            if let Some(root) = &route.root {
-                return HttpResponseBuilder::serve_directory_listing(root);
-            }
+                return HttpResponseBuilder::serve_directory_listing(&route.root);
         }
 
         // Default file exists? Serve it
