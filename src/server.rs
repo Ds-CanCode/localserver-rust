@@ -8,7 +8,6 @@ use crate::utils::{HttpHeaders, HttpMethod};
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 use std::collections::HashMap;
-use std::f32::consts::E;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
@@ -145,41 +144,44 @@ fn extract_hostname(headers: &HttpHeaders) -> &str {
         .unwrap_or("")
 }
 
-fn select_server<'a>(listener_info: &'a ListenerInfo, hostname: &str) -> Option<&'a ServerConfig> {
+fn select_server<'a>(listener_info: &'a ListenerInfo, hostname: &str) -> &'a ServerConfig {
     // Try to find a server matching the hostname
-    let matched = listener_info
+    if let Some(srv) = listener_info
         .servers
         .iter()
-        .find(|s| s.server_name == hostname);
-
-    if let Some(srv) = matched {
+        .find(|s| s.server_name == hostname)
+    {
         println!(
             "Selected server '{}' for Host: {}",
             srv.server_name, hostname
         );
-        Some(srv)
-    } else {
-        let default = listener_info
-            .servers
-            .get(listener_info.default_server_index);
-        if let Some(srv) = default {
-            println!(
-                "No match for Host: '{}', using default server '{}'",
-                hostname, srv.server_name
-            );
-        }
-        default
+        return srv;
     }
+
+    // Fallback to default server
+    let default_index = listener_info.default_server_index;
+    let default_srv = listener_info.servers.get(default_index).unwrap_or_else(|| {
+        panic!(
+            "Invalid default_server_index {} for listener with {} servers",
+            default_index,
+            listener_info.servers.len()
+        )
+    });
+
+    println!(
+        "No match for Host: '{}', using default server '{}'",
+        hostname, default_srv.server_name
+    );
+
+    default_srv
 }
 
-fn get_error_page_path(server: Option<&ServerConfig>, status_code: u16) -> String {
+fn get_error_page_path(server: &ServerConfig, status_code: u16) -> String {
     server
-        .and_then(|s| {
-            s.error_pages
-                .iter()
-                .find(|ep| ep.code == status_code)
-                .map(|ep| ep.path.clone())
-        })
+        .error_pages
+        .iter()
+        .find(|ep| ep.code == status_code)
+        .map(|ep| ep.path.clone())
         .unwrap_or_else(|| format!("./error_pages/{}.html", status_code))
 }
 
@@ -198,11 +200,11 @@ fn find_matching_route<'a>(server: &'a ServerConfig, request_path: &str) -> Opti
 }
 
 fn resolve_file_path(
-    server: Option<&ServerConfig>,
+    server: &ServerConfig,
     route: &crate::config::Route,
     request_path: &str,
 ) -> String {
-    let server_root = server.and_then(|s| s.root.as_deref()).unwrap_or(".");
+    let server_root = server.root.as_deref().unwrap_or(".");
     let route_root = route.root.as_deref().unwrap_or("");
     let base = format!("{}/{}", server_root, route_root);
 
@@ -226,7 +228,6 @@ fn read_request(stream: &mut TcpStream, request: &mut HttpRequestBuilder) -> Opt
         match stream.read(&mut buf) {
             Ok(0) => return None, // Connection closed
             Ok(n) => {
-
                 if let Err(e) = request.append(buf[..n].to_vec()) {
                     return None;
                 }
@@ -294,15 +295,11 @@ fn handle_read_state(
 
     // Select server based on Host header
     let hostname = extract_hostname(&request.headers);
-    let selected_server = listener_info.and_then(|info| select_server(info, hostname));
-
-    // Get error page paths
-    let error_404_path = get_error_page_path(selected_server, 404);
-    let error_405_path = get_error_page_path(selected_server, 405);
+    let info = listener_info.expect("No listener info available");
+    let selected_server: &ServerConfig = select_server(info, hostname);
 
     // Find matching route
-    let selected_route =
-        selected_server.and_then(|server| find_matching_route(server, &request.path));
+    let selected_route = find_matching_route(selected_server, &request.path);
 
     let response_bytes = match selected_route {
         Some(route) => {
@@ -316,14 +313,14 @@ fn handle_read_state(
             if !method_allowed {
                 let allowed: Vec<String> = route.methods.clone();
 
-                handle_method_not_allowed(&allowed, &error_405_path)
+                handle_method_not_allowed(&allowed, &selected_server)
             } else {
                 // Resolve file path
                 let file_path = resolve_file_path(selected_server, route, &request.path);
 
                 // Handle based on method
                 match request_method {
-                    HttpMethod::GET => handle_get(&file_path, &error_404_path),
+                    HttpMethod::GET => handle_get(&file_path, &selected_server),
                     HttpMethod::POST => {
                         let body = request.body.as_deref().unwrap_or(&[]);
                         handle_post(&file_path, body, &error_404_path)
@@ -333,9 +330,7 @@ fn handle_read_state(
                 }
             }
         }
-        None => {
-            HttpResponseBuilder::serve_error_page(&error_404_path, 404, "Not Found")
-        }
+        None => HttpResponseBuilder::serve_error_page(&error_404_path, 404, "Not Found"),
     };
 
     // Set response and transition to Write state
@@ -347,7 +342,6 @@ fn handle_read_state(
 
 /// Handles the Write state: writes response and manages keep-alive
 fn handle_write_state(socket_data: &mut SocketData) -> Option<bool> {
-
     let response = socket_data.status.response.as_mut()?;
 
     // Write the response
@@ -362,7 +356,6 @@ fn handle_write_state(socket_data: &mut SocketData) -> Option<bool> {
     if !response.is_finished() {
         return Some(true);
     }
-
 
     // Check for keep-alive
     let request = socket_data.status.request.get()?;

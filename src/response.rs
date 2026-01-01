@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::utils::HttpHeaders;
+use crate::{config::ServerConfig, server, utils::HttpHeaders};
 
 pub struct HttpResponseBuilder {
     status_code: u16,
@@ -70,6 +70,26 @@ impl HttpResponseBuilder {
     }
 
     // === File serving methods ===
+    /// Serve a directory listing as HTML
+    pub fn serve_directory_listing(dir_path: &str) -> Vec<u8> {
+        let mut listing = String::from("<html><body><h1>Directory Listing</h1><ul>");
+
+        if let Ok(entries) = fs::read_dir(dir_path) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let file_name = entry.file_name();
+                    let file_name_str = file_name.to_string_lossy();
+                    listing.push_str(&format!(
+                        "<li><a href=\"{}\">{}</a></li>",
+                        file_name_str, file_name_str
+                    ));
+                }
+            }
+        }
+
+        listing.push_str("</ul></body></html>");
+        Self::ok().body(listing.into_bytes().to_vec()).build()
+    }
 
     /// Serve a file with automatic content-type detection
     pub fn serve_file(path: &str) -> Result<Vec<u8>, std::io::Error> {
@@ -149,8 +169,29 @@ fn detect_content_type(path: &str) -> &'static str {
 
 // === Handler functions for different HTTP methods ===
 
-pub fn handle_get(file_path: &str, error_page_path: &str) -> Vec<u8> {
-    HttpResponseBuilder::serve_file_or_404(file_path, error_page_path)
+pub fn handle_get(request_path: &str, server: &ServerConfig) -> Vec<u8> {
+    if let Some(route) = server.routes.iter().find(|r| r.path == request_path) {
+        // Directory listing allowed?
+        if route.list_directory == Some(true) {
+            if let Some(root) = &route.root {
+                return HttpResponseBuilder::serve_directory_listing(root);
+            }
+        }
+
+        // Default file exists? Serve it
+        if let Some(default_file) = &route.default_file {
+            let root = route.root;
+            let full_path = format!("{}/{}", root, default_file);
+            return HttpResponseBuilder::serve_file_or_404(
+                &full_path,
+                &get_error_page_path(server, 404),
+            );
+        }
+    }
+
+    // If no route or no listing/default file, try to serve the requested file directly
+    let error_page_path = get_error_page_path(server, 404);
+    HttpResponseBuilder::serve_file_or_404(request_path, &error_page_path)
 }
 
 pub fn handle_post(file_path: &str, body: &[u8], error_page_path: &str) -> Vec<u8> {
@@ -186,13 +227,19 @@ pub fn handle_delete(file_path: &str, error_page_path: &str) -> Vec<u8> {
     }
 }
 
-pub fn handle_method_not_allowed(
-    allowed_methods: &[String],
-    method_not_allowed_path: &str,
-) -> Vec<u8> {
+pub fn handle_method_not_allowed(allowed_methods: &[String], server: &ServerConfig) -> Vec<u8> {
     let allow_header = allowed_methods.join(", ");
 
-    match fs::read(method_not_allowed_path) {
+    // Get the path of the 405 error page, fallback to default
+    let path = server
+        .error_pages
+        .iter()
+        .find(|page| page.code == 405)
+        .map(|page| page.path.as_str())
+        .unwrap_or("./errors_pages/405.html");
+
+    // Read the file content
+    match fs::read(path) {
         Ok(content) => HttpResponseBuilder::method_not_allowed()
             .header("Allow", &allow_header)
             .header("Content-Type", "text/html")
@@ -204,4 +251,13 @@ pub fn handle_method_not_allowed(
             .body(b"Method Not Allowed".to_vec())
             .build(),
     }
+}
+
+fn get_error_page_path(server: &ServerConfig, status_code: u16) -> String {
+    server
+        .error_pages
+        .iter()
+        .find(|ep| ep.code == status_code)
+        .map(|ep| ep.path.clone())
+        .unwrap_or_else(|| format!("./error_pages/{}.html", status_code))
 }

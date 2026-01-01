@@ -14,7 +14,7 @@ pub struct ServerConfig {
     pub default_server: bool,       // NEW: Mark as default for this (host, port)
     pub error_pages: Vec<ErrorPage>,
     pub client_max_body_size: usize,
-    pub root: Option<String>,       // NEW: Server-level root directory
+    pub root: String,       // NEW: Server-level root directory
     pub routes: Vec<Route>,
 }
 
@@ -28,7 +28,7 @@ pub struct ErrorPage {
 pub struct Route {
     pub path: String,
     pub methods: Vec<String>,
-    pub root: Option<String>,
+    pub root: String,
     pub default_file: Option<String>,
     pub redirect: Option<String>,   // NEW: HTTP redirect
     pub cgi: Option<String>,        // NEW: CGI extension (e.g., ".py", ".php")
