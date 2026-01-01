@@ -76,6 +76,7 @@ impl HttpResponseBuilder {
 
         if let Ok(entries) = fs::read_dir(dir_path) {
             for entry in entries {
+                println!("Reading directory entry for listing");
                 if let Ok(entry) = entry {
                     let file_name = entry.file_name();
                     let file_name_str = file_name.to_string_lossy();
@@ -175,7 +176,7 @@ pub fn handle_get(request_path: &str, server: &ServerConfig, route: &Route) -> V
         if route.list_directory == Some(true) {
 
             println!("Serving directory  00000000000000000000000000000listing for: {}", route.root);
-            return HttpResponseBuilder::serve_directory_listing(&route.root);
+            return HttpResponseBuilder::serve_directory_listing(&request_path);
         }
 
         // Default file exists? Serve it
