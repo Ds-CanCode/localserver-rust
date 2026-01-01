@@ -1,6 +1,12 @@
 use std::fs;
 
-use crate::{config::{Route, ServerConfig}, server, utils::HttpHeaders};
+use crate::request::HttpRequest;
+use crate::{
+    config::{Route, ServerConfig},
+    request::HttpRequestBuilder,
+    server,
+    utils::HttpHeaders,
+};
 
 pub struct HttpResponseBuilder {
     status_code: u16,
@@ -71,7 +77,7 @@ impl HttpResponseBuilder {
 
     // === File serving methods ===
     /// Serve a directory listing as HTML
-    pub fn serve_directory_listing(dir_path: &str) -> Vec<u8> {
+    pub fn serve_directory_listing(dir_path: &str, route_path: &str) -> Vec<u8> {
         let mut listing = String::from("<html><body><h1>Directory Listing</h1><ul>");
 
         if let Ok(entries) = fs::read_dir(dir_path) {
@@ -81,8 +87,8 @@ impl HttpResponseBuilder {
                     let file_name = entry.file_name();
                     let file_name_str = file_name.to_string_lossy();
                     listing.push_str(&format!(
-                        "<li><a href=\"{}\">{}</a></li>",
-                        file_name_str, file_name_str
+                        "<li><a href=\"{}\\{}\">{}</a></li>",
+                        route_path, file_name_str, file_name_str
                     ));
                 }
             }
@@ -170,19 +176,19 @@ fn detect_content_type(path: &str) -> &'static str {
 
 // === Handler functions for different HTTP methods ===
 
-pub fn handle_get(request_path: &str, server: &ServerConfig, route: &Route) -> Vec<u8> {
-    if let Some(route) = server.routes.iter().find(|r| r.path == route.path) {
+pub fn handle_get(request_path: &str, server: &ServerConfig, request: &HttpRequest) -> Vec<u8> {
+    if let Some(route) = server.routes.iter().find(|r| r.path == request.path) {
         // Directory listing allowed?
         if route.list_directory == Some(true) {
-
-            println!("Serving directory  00000000000000000000000000000listing for: {}", route.root);
-            return HttpResponseBuilder::serve_directory_listing(&request_path);
+            return HttpResponseBuilder::serve_directory_listing(&request_path, &route.path);
         }
 
         // Default file exists? Serve it
         if let Some(default_file) = &route.default_file {
+            let server_root = &server.root;
             let root = &route.root;
-            let full_path = format!("{}/{}", root, default_file);
+            let full_path = format!("{}{}/{}", server_root, root, default_file);
+            println!("Serving default file for route: {}", full_path);
             return HttpResponseBuilder::serve_file_or_404(
                 &full_path,
                 &get_error_page_path(server, 404),

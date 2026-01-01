@@ -1,5 +1,6 @@
 use crate::config::{Config, Route, ServerConfig};
 use crate::request::HttpRequestBuilder;
+use crate::request::HttpRequest;
 use crate::response::{
     HttpResponseBuilder, handle_delete, handle_get, handle_method_not_allowed, handle_post,
 };
@@ -291,7 +292,7 @@ fn handle_read_state(
     }
 
     // Parse request
-    let request = socket_data.status.request.get()?;
+    let request :&HttpRequest  = socket_data.status.request.get()?;
 
     // Select server based on Host header
     let hostname = extract_hostname(&request.headers);
@@ -311,7 +312,7 @@ fn handle_read_state(
                 .any(|m| HttpMethod::from_str(m) == *request_method);
 
             if !method_allowed {
-                let allowed  = &route.methods;
+                let allowed = &route.methods;
 
                 handle_method_not_allowed(&allowed, &selected_server)
             } else {
@@ -320,7 +321,7 @@ fn handle_read_state(
 
                 // Handle based on method
                 match request_method {
-                    HttpMethod::GET => handle_get(&file_path, &selected_server , route),
+                    HttpMethod::GET => handle_get(&file_path, &selected_server, &request),
                     HttpMethod::POST => {
                         let body = request.body.as_deref().unwrap_or(&[]);
                         handle_post(&file_path, body)
@@ -330,11 +331,16 @@ fn handle_read_state(
                     }
                     HttpMethod::Other(_) => {
                         let allowed = &route.methods;
-                        handle_method_not_allowed(&allowed, &selected_server)},
+                        handle_method_not_allowed(&allowed, &selected_server)
+                    }
                 }
             }
         }
-        None => HttpResponseBuilder::serve_error_page(&get_error_page_path(selected_server, 404), 404, "Not Found"),
+        None => HttpResponseBuilder::serve_error_page(
+            &get_error_page_path(selected_server, 404),
+            404,
+            "Not Found",
+        ),
     };
 
     // Set response and transition to Write state
