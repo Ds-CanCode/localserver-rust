@@ -323,8 +323,7 @@ fn handle_read_state(
                 match request_method {
                     HttpMethod::GET => handle_get(&file_path, &selected_server, &request),
                     HttpMethod::POST => {
-                        let body = request.body.as_deref().unwrap_or(&[]);
-                        handle_post(&file_path, body)
+                        handle_post(&file_path, &request)
                     }
                     HttpMethod::DELETE => {
                         handle_delete(&file_path, &get_error_page_path(selected_server, 404))

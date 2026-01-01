@@ -187,8 +187,7 @@ pub fn handle_get(request_path: &str, server: &ServerConfig, request: &HttpReque
         if let Some(default_file) = &route.default_file {
             let server_root = &server.root;
             let root = &route.root;
-            let full_path = format!("{}{}/{}", server_root, root, default_file);
-            println!("Serving default file for route: {}", full_path);
+            let full_path = format!("{}/{}/{}", server_root, root, default_file);
             return HttpResponseBuilder::serve_file_or_404(
                 &full_path,
                 &get_error_page_path(server, 404),
@@ -201,9 +200,18 @@ pub fn handle_get(request_path: &str, server: &ServerConfig, request: &HttpReque
     HttpResponseBuilder::serve_file_or_404(request_path, &error_page_path)
 }
 
-pub fn handle_post(file_path: &str, body: &[u8]) -> Vec<u8> {
+pub fn handle_post(file_path: &str, request: &HttpRequest) -> Vec<u8> {
     // Example: Write/append to file
-    match fs::write(file_path, body) {
+
+    if let Some(body) = &request.body {
+        match std::str::from_utf8(body) {
+            Ok(s) => println!("POST: Writing to file {:?}", s),
+            Err(_) => println!("POST: Writing to file (non-UTF8 data) {:?}", body),
+        }
+    } else {
+        println!("POST: Writing to file empty body");
+    }
+    match fs::write(file_path, request.body.as_deref().unwrap_or(&[])) {
         Ok(_) => {
             println!("POST: Successfully wrote to {}", file_path);
             HttpResponseBuilder::ok()
