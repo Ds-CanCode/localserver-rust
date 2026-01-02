@@ -17,7 +17,7 @@ servers:
         default_file: "index.html"
       
       - path: "/blog"
-        methods: ["GET" , "POST" , "DELETE"]
+        methods: ["GET" , "DELETE"]
         root: "/var/www/blog/"
         default_file: "home.html"
         list_directory: true
@@ -37,8 +37,9 @@ servers:
     host: 127.0.0.1
     ports:
       - 8080
+    default_server: false
     routes:
       - path: "/"
         methods: ["GET"]
-        root: "./var/www/html"
+        root: "/var/www/html"
         default_file: "index.html"

@@ -16,5 +16,6 @@ if os.environ.get('REQUEST_METHOD') == 'POST':
     if content_length > 0:
         post_data = sys.stdin.read(content_length)
         print(f"<p>POST Data: {post_data}</p>")
+      
 
 print("</body></html>")

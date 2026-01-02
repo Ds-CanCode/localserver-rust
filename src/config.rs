@@ -178,7 +178,7 @@ fn parse_server(lines: &[String], start: usize) -> Result<(ServerConfig, usize),
     let mut host = None;
     let mut default_server = false;
     let mut client_max_body_size = None;
-    let mut root = String::new();
+    let mut root = String::from(".");
     let mut ports = Vec::new();
     let mut error_pages = Vec::new();
     let mut routes = Vec::new();
