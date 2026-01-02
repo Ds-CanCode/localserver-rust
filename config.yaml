@@ -19,6 +19,7 @@ servers:
       - path: "/blog"
         methods: ["GET" , "POST" , "DELETE"]
         root: "/var/www/blog/"
+        default_file: "home.html"
         list_directory: true
       
       - path: "/api"

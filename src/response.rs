@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::request::HttpRequest;
@@ -88,9 +89,14 @@ impl HttpResponseBuilder {
 
     // === File serving methods ===
     /// Serve a directory listing as HTML
-    pub fn serve_directory_listing(dir_path: &str, route_path: &str) -> Vec<u8> {
+    pub fn serve_directory_listing(
+        server_root: &str,
+        route_root: &str,
+        route_path: &str,
+    ) -> Vec<u8> {
         let mut listing = String::from("<html><body><h1>Directory Listing</h1><ul>");
 
+        let dir_path = format!("{}/{}", server_root, route_root);
         if let Ok(entries) = fs::read_dir(dir_path) {
             for entry in entries {
                 println!("Reading directory entry for listing");
@@ -188,17 +194,33 @@ fn detect_content_type(path: &str) -> &'static str {
 // === Handler functions for different HTTP methods ===
 
 pub fn handle_get(request_path: &str, server: &ServerConfig, request: &HttpRequest) -> Vec<u8> {
-    if let Some(route) = server.routes.iter().find(|r| r.path == request.path) {
+    // trim request path from leading '/' or trailing '/'
+    let path = request.path.trim_matches('/');
+    println!("Handling GET for path: {}", path);
+
+    if let Some(route) = server
+        .routes
+        .iter()
+        .find(|r| r.path.trim_matches('/') == path)
+    {
         // Directory listing allowed?
         if route.list_directory == Some(true) {
-            return HttpResponseBuilder::serve_directory_listing(&request_path, &route.path);
+            return HttpResponseBuilder::serve_directory_listing(
+                &server.root,
+                &route.root,
+                &route.path,
+            );
         }
-
         // Default file exists? Serve it
         if let Some(default_file) = &route.default_file {
             let server_root = &server.root;
             let root = &route.root;
             let full_path = format!("{}/{}/{}", server_root, root, default_file);
+
+            println!(
+                "Serving default file for route {}: {}",
+                route.path, full_path
+            );
             return HttpResponseBuilder::serve_file_or_404(
                 &full_path,
                 &get_error_page_path(server, 404),
@@ -287,7 +309,8 @@ pub fn handle_post(file_path: &str, request: &HttpRequest) -> Vec<u8> {
         || content_type.starts_with("image/")
         || content_type.starts_with("audio/")
         || content_type.starts_with("video/")
-        || content_type.starts_with("font/") || content_type .starts_with("text/")
+        || content_type.starts_with("font/")
+        || content_type.starts_with("text/")
     {
         // get file extension from content type
         let b = content_type.split('/').nth(1).unwrap_or("dat");
@@ -303,7 +326,10 @@ pub fn handle_post(file_path: &str, request: &HttpRequest) -> Vec<u8> {
             }
         };
 
-        println!("Direct upload filename: {}  and  save path is  {}", filename, file_path);
+        println!(
+            "Direct upload filename: {}  and  save path is  {}",
+            filename, file_path
+        );
 
         let save_path = if file_path.ends_with('/') {
             format!("{}{}", file_path, filename)
@@ -311,7 +337,6 @@ pub fn handle_post(file_path: &str, request: &HttpRequest) -> Vec<u8> {
             format!("{}", file_path)
         };
 
-        println!("Saving non-multipart file to: {}", save_path);
         return write_file(&save_path, body);
     }
 
@@ -467,4 +492,14 @@ fn extract_filename_from_disposition(part: &str) -> Option<String> {
     }
 
     None
+}
+
+fn safe_path(base: &Path, user_input: &str) -> Option<PathBuf> {
+    let full_path = base.join(user_input);
+    let canonical = full_path.canonicalize().ok()?;
+    if canonical.starts_with(base) {
+        Some(canonical)
+    } else {
+        None
+    }
 }
