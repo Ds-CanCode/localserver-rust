@@ -58,6 +58,9 @@ impl HttpResponseBuilder {
     pub fn ok() -> Self {
         Self::new(200, "OK")
     }
+    pub fn created() -> Self {
+        Self::new(201, "Created")
+    }
 
     pub fn not_found() -> Self {
         Self::new(404, "Not Found")
@@ -73,6 +76,13 @@ impl HttpResponseBuilder {
 
     pub fn internal_error() -> Self {
         Self::new(500, "Internal Server Error")
+    }
+    pub fn bad_request() -> Self {
+        Self::new(400, "Bad Request")
+    }
+
+    pub fn unsupported_media_type() -> Self {
+        Self::new(415, "Unsupported Media Type")
     }
 
     // === File serving methods ===
@@ -200,35 +210,6 @@ pub fn handle_get(request_path: &str, server: &ServerConfig, request: &HttpReque
     HttpResponseBuilder::serve_file_or_404(request_path, &error_page_path)
 }
 
-pub fn handle_post(file_path: &str, request: &HttpRequest) -> Vec<u8> {
-    // Example: Write/append to file
-
-    if let Some(body) = &request.body {
-        match std::str::from_utf8(body) {
-            Ok(s) => println!("POST: Writing to file {:?}", s),
-            Err(_) => println!("POST: Writing to file (non-UTF8 data) {:?}", body),
-        }
-    } else {
-        println!("POST: Writing to file empty body");
-    }
-    match fs::write(file_path, request.body.as_deref().unwrap_or(&[])) {
-        Ok(_) => {
-            println!("POST: Successfully wrote to {}", file_path);
-            HttpResponseBuilder::ok()
-                .header("Content-Type", "text/plain")
-                .body(b"File uploaded successfully".to_vec())
-                .build()
-        }
-        Err(e) => {
-            eprintln!("POST: Error writing to {}: {:?}", file_path, e);
-            HttpResponseBuilder::internal_error()
-                .header("Content-Type", "text/plain")
-                .body(format!("Error: {}", e).into_bytes())
-                .build()
-        }
-    }
-}
-
 pub fn handle_delete(file_path: &str, error_page_path: &str) -> Vec<u8> {
     match fs::remove_file(file_path) {
         Ok(_) => {
@@ -275,4 +256,173 @@ fn get_error_page_path(server: &ServerConfig, status_code: u16) -> String {
         .find(|ep| ep.code == status_code)
         .map(|ep| ep.path.clone())
         .unwrap_or_else(|| format!("./error_pages/{}.html", status_code))
+}
+
+pub fn handle_post(file_path: &str, request: &HttpRequest) -> Vec<u8> {
+    let body = match &request.body {
+        Some(b) => b,
+        None => {
+            return HttpResponseBuilder::bad_request()
+                .body(b"Empty body".to_vec())
+                .build();
+        }
+    };
+
+    let content_type = match request.headers.get("content-type") {
+        Some(v) => v,
+        None => {
+            return HttpResponseBuilder::bad_request()
+                .body(b"Missing Content-Type".to_vec())
+                .build();
+        }
+    };
+
+    if content_type.starts_with("application/octet-stream") {
+        return write_file(file_path, body);
+    }
+
+    if content_type.starts_with("multipart/form-data") {
+        let boundary = match extract_boundary(content_type) {
+            Some(b) => b,
+            None => {
+                return HttpResponseBuilder::bad_request()
+                    .body(b"Missing multipart boundary".to_vec())
+                    .build();
+            }
+        };
+
+        println!("Extracted boundary: {}", boundary);
+
+        let files = extract_multipart_files(body, &boundary);
+
+        if files.is_empty() {
+            return HttpResponseBuilder::bad_request()
+                .body(b"Invalid multipart body or no files found".to_vec())
+                .build();
+        }
+
+        // Write each file with its extracted filename
+        let mut saved_files = Vec::new();
+        for (filename, file_bytes) in files.iter() {
+            // Combine the directory from file_path with the extracted filename
+            let save_path = if file_path.ends_with('/') {
+                format!("{}{}", file_path, filename)
+            } else {
+                format!("{}/{}", file_path, filename)
+            };
+
+            let response = write_file(&save_path, file_bytes);
+            // Check if write failed
+            if response.starts_with(b"HTTP/1.1 500") || response.starts_with(b"HTTP/1.1 4") {
+                return response;
+            }
+            saved_files.push(filename.clone());
+        }
+
+        HttpResponseBuilder::created()
+            .body(
+                format!(
+                    "Successfully uploaded {} file(s): {}",
+                    saved_files.len(),
+                    saved_files.join(", ")
+                )
+                .into_bytes(),
+            )
+            .build()
+    } else {
+        HttpResponseBuilder::unsupported_media_type()
+            .body(b"Unsupported Content-Type".to_vec())
+            .build()
+    }
+}
+
+fn write_file(path: &str, data: &[u8]) -> Vec<u8> {
+    match fs::write(path, data) {
+        Ok(_) => HttpResponseBuilder::ok()
+            .header("Content-Type", "text/plain")
+            .body(b"Upload successful".to_vec())
+            .build(),
+        Err(e) => HttpResponseBuilder::internal_error()
+            .body(e.to_string().into_bytes())
+            .build(),
+    }
+}
+fn extract_boundary(content_type: &str) -> Option<String> {
+    content_type
+        .split(';')
+        .find(|s| s.trim().starts_with("boundary="))
+        .map(|s| s.trim().trim_start_matches("boundary=").to_string())
+}
+
+fn extract_multipart_files<'a>(body: &'a [u8], boundary: &'a str) -> Vec<(String, &'a [u8])> {
+    let boundary = format!("--{}", boundary);
+    let body_str = match std::str::from_utf8(body) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let parts: Vec<&str> = body_str.split(&boundary).collect();
+    let mut files = Vec::new();
+
+    for part in parts.iter() {
+        // Skip parts that don't contain Content-Disposition (not file parts)
+        if !part.contains("Content-Disposition") {
+            continue;
+        }
+
+        // Extract filename from Content-Disposition header
+        let filename = extract_filename_from_disposition(part);
+        if filename.is_none() {
+            continue;
+        }
+        let filename = filename.unwrap();
+
+        // Find the end of headers (blank line separates headers from data)
+        let header_end = match part.find("\r\n\r\n") {
+            Some(pos) => pos,
+            None => continue,
+        };
+
+        let data_start = header_end + 4;
+        let data = &part[data_start..];
+
+        // Clean up trailing boundary markers and whitespace
+        let data = data.trim_end_matches("\r\n").trim_end_matches("--");
+
+        // Find the actual byte position in the original body
+        let start = match body_str.find(data) {
+            Some(pos) => pos,
+            None => continue,
+        };
+
+        println!("Extracted file '{}' of length: {}", filename, data.len());
+        files.push((filename, &body[start..start + data.len()]));
+    }
+
+    files
+}
+
+fn extract_filename_from_disposition(part: &str) -> Option<String> {
+    // Find the Content-Disposition line
+    let disposition_line = part
+        .lines()
+        .find(|line| line.contains("Content-Disposition"))?;
+
+    // Look for filename="..." or filename*=...
+    if let Some(start) = disposition_line.find("filename=\"") {
+        let start = start + 10; // length of 'filename="'
+        let end = disposition_line[start..].find('"')?;
+        return Some(disposition_line[start..start + end].to_string());
+    }
+
+    // Fallback: look for filename= without quotes
+    if let Some(start) = disposition_line.find("filename=") {
+        let start = start + 9; // length of 'filename='
+        let end = disposition_line[start..]
+            .find(|c: char| c == ';' || c == '\r' || c == '\n')
+            .unwrap_or(disposition_line[start..].len());
+        return Some(disposition_line[start..start + end].trim().to_string());
+    }
+
+    None
 }

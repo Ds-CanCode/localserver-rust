@@ -13,6 +13,10 @@ impl HttpHeaders {
     }
 
     pub fn insert(&mut self, key: &str, value: &str) {
+
+        // trim whitespace and convert key to lowercase
+        let value = value.trim();
+        let key = key.trim();
         self.inner
             .insert(key.to_ascii_lowercase(), value.to_string());
     }
