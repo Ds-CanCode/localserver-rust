@@ -201,13 +201,17 @@ fn find_matching_route<'a>(server: &'a ServerConfig, request_path: &str) -> Opti
         .max_by_key(|route| route.path.len())
 }
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 fn resolve_file_path(
     server: &ServerConfig,
     route: &crate::config::Route,
     request_path: &str,
 ) -> Option<String> {
+    println!(
+        "Resolving file path for request_path: '{}' under route: '{}'",
+        request_path, route.path
+    );
     let server_root = &server.root;
     let route_root = &route.root;
     let base = format!("{}/{}", server_root, route_root);
@@ -219,16 +223,10 @@ fn resolve_file_path(
     };
 
     // Determine the relative path to append
-    let relative_path = if request_path == route.path {
-        // Use default file if available, otherwise empty string
-        route.default_file.as_deref().unwrap_or("")
-    } else {
-        // Strip the route prefix from the request path
-        request_path
-            .strip_prefix(&route.path)
-            .unwrap_or("")
-            .trim_start_matches('/')
-    };
+    let relative_path = request_path
+        .strip_prefix(&route.path)
+        .unwrap_or("")
+        .trim_start_matches('/');
 
     // Join base with the relative path and canonicalize
     let full_path = base_path.join(relative_path);
@@ -335,8 +333,6 @@ fn handle_read_state(
 
     // Parse request
     let request: &HttpRequest = socket_data.status.request.get()?;
-
-    println!("Received request: {:#?}", request);
 
     // Select server based on Host header
     let hostname = extract_hostname(&request.headers);

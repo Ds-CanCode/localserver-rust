@@ -355,6 +355,7 @@ pub fn handle_post(file_path: &str, request: &HttpRequest) -> Vec<u8> {
         let files = extract_multipart_files(body, &boundary);
 
         if files.is_empty() {
+            println!("No files extracted from multipart body");
             return HttpResponseBuilder::bad_request()
                 .body(b"Invalid multipart body or no files found".to_vec())
                 .build();
@@ -421,52 +422,66 @@ fn extract_boundary(content_type: &str) -> Option<String> {
         .map(|s| s.trim().trim_start_matches("boundary=").to_string())
 }
 
-fn extract_multipart_files<'a>(body: &'a [u8], boundary: &'a str) -> Vec<(String, &'a [u8])> {
-    let boundary = format!("--{}", boundary);
-    let body_str = match std::str::from_utf8(body) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-
-    let parts: Vec<&str> = body_str.split(&boundary).collect();
+fn extract_multipart_files<'a>(body: &'a [u8], boundary: &str) -> Vec<(String, &'a [u8])> {
     let mut files = Vec::new();
 
-    for part in parts.iter() {
-        // Skip parts that don't contain Content-Disposition (not file parts)
-        if !part.contains("Content-Disposition") {
-            continue;
+    let boundary = format!("--{}", boundary);
+    let boundary = boundary.as_bytes();
+
+    let mut pos = 0;
+
+    while let Some(b_start) = find_bytes(&body[pos..], boundary) {
+        let part_start = pos + b_start + boundary.len();
+
+        if part_start >= body.len() {
+            break;
         }
 
-        // Extract filename from Content-Disposition header
-        let filename = extract_filename_from_disposition(part);
-        if filename.is_none() {
-            continue;
+        if let Some(b_end) = find_bytes(&body[part_start..], boundary) {
+            let part = &body[part_start..part_start + b_end];
+            pos = part_start + b_end;
+
+            let header_end = find_bytes(part, b"\r\n\r\n");
+            let Some(header_end) = header_end else {
+                continue;
+            };
+
+            let headers = &part[..header_end];
+            let data = &part[header_end + 4..];
+
+            let headers_str = match std::str::from_utf8(headers) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            if !headers_str.contains("Content-Disposition") {
+                continue;
+            }
+
+            let filename = extract_filename_from_disposition(headers_str);
+            let Some(filename) = filename else { continue };
+
+            let data = strip_trailing_crlf(data);
+
+            files.push((filename, data));
+        } else {
+            break;
         }
-        let filename = filename.unwrap();
-
-        // Find the end of headers (blank line separates headers from data)
-        let header_end = match part.find("\r\n\r\n") {
-            Some(pos) => pos,
-            None => continue,
-        };
-
-        let data_start = header_end + 4;
-        let data = &part[data_start..];
-
-        // Clean up trailing boundary markers and whitespace
-        let data = data.trim_end_matches("\r\n").trim_end_matches("--");
-
-        // Find the actual byte position in the original body
-        let start = match body_str.find(data) {
-            Some(pos) => pos,
-            None => continue,
-        };
-
-        println!("Extracted file '{}' of length: {}", filename, data.len());
-        files.push((filename, &body[start..start + data.len()]));
     }
 
     files
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn strip_trailing_crlf(data: &[u8]) -> &[u8] {
+    let mut end = data.len();
+    if end >= 2 && &data[end - 2..end] == b"\r\n" {
+        end -= 2;
+    }
+    data[..end].as_ref()
 }
 
 fn extract_filename_from_disposition(part: &str) -> Option<String> {
