@@ -17,7 +17,7 @@ servers:
         default_file: "index.html"
       
       - path: "/blog"
-        methods: ["GET" , "DELETE"]
+        methods: ["GET" , "DELETE", "POST"]
         root: "/var/www/blog/"
         default_file: "home.html"
         list_directory: true

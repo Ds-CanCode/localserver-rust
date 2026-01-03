@@ -6,6 +6,7 @@ pub mod router;
 pub mod server;
 pub mod utils;
 pub(crate) mod response;
+pub mod handler;
 
 use server::Server;
 

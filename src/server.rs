@@ -1,10 +1,9 @@
 use crate::cgi::run_cgi;
 use crate::config::{Config, Route, ServerConfig};
+use crate::handler::{handle_delete, handle_get, handle_post};
 use crate::request::HttpRequest;
 use crate::request::HttpRequestBuilder;
-use crate::response::{
-    HttpResponseBuilder, handle_delete, handle_get, handle_method_not_allowed, handle_post,
-};
+use crate::response::{HttpResponseBuilder, handle_method_not_allowed};
 use crate::router::Router;
 use crate::utils::{HttpHeaders, HttpMethod};
 use mio::net::{TcpListener, TcpStream};
