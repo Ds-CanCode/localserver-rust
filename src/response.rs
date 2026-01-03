@@ -310,16 +310,6 @@ fn extract_filename_from_disposition(part: &str) -> Option<String> {
     None
 }
 
-fn safe_path(base: &Path, user_input: &str) -> Option<PathBuf> {
-    let full_path = base.join(user_input);
-    let canonical = full_path.canonicalize().ok()?;
-    if canonical.starts_with(base) {
-        Some(canonical)
-    } else {
-        None
-    }
-}
-
 
 pub(crate) fn extract_boundary(content_type: &str) -> Option<String> {
     content_type
