@@ -3,6 +3,7 @@ import os
 import sys
 
 print("Content-Type: text/html\r")
+
 print("\r")
 print("<html><body>")
 print("<h1>CGI Test - Python</h1>")

@@ -23,6 +23,10 @@ impl HttpResponseBuilder {
         self.headers.insert(key, value);
         self
     }
+    pub fn headers(mut self, headers: HttpHeaders) -> Self {
+        self.headers = headers;
+        self
+    }
 
     pub fn body(mut self, body: Vec<u8>) -> Self {
         self.body = body;

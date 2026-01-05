@@ -3,6 +3,7 @@ use crate::{
     request::HttpRequest,
     response::HttpResponseBuilder,
     server::{SimpleResponse, SocketData, Status},
+    utils::HttpHeaders,
 };
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -113,12 +114,37 @@ pub fn run_cgi(
             match child.wait_with_output() {
                 Ok(output) => {
                     if output.status.success() {
+                        let body = output.stdout;
+                        let mut headers = HttpHeaders::new();
+                        let mut lines = body.split(|&b| b == b'\n');
+
+                        while let Some(line) = lines.next() {
+                            // Trim CR (\r) at the end
+                            let line = line.strip_suffix(&[b'\r']).unwrap_or(line);
+
+                            if line.is_empty() {
+                                break;
+                            }
+
+                            if let Some(colon_pos) = line.iter().position(|&b| b == b':') {
+                                let key = &line[..colon_pos];
+                                let value = &line[colon_pos + 1..];
+                                let key_str = String::from_utf8_lossy(key).trim().to_string();
+                                let value_str = String::from_utf8_lossy(value).trim().to_string();
+                                headers.insert(&key_str, &value_str);
+                            }
+                        }
+
+                        let body = lines
+                            .flat_map(|l| l.iter().cloned().chain(std::iter::once(b'\n')))
+                            .collect::<Vec<u8>>();
+
                         println!("CGI execution successful");
 
                         // Construire la réponse HTTP
                         let response = HttpResponseBuilder::new(200, "OK")
-                            .header("Content-Type", "text/html")
-                            .body(output.stdout)
+                            .headers(headers)
+                            .body(body)
                             .build();
 
                         socket_data.status.response = Some(Box::new(SimpleResponse::new(response)));
