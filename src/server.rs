@@ -1,6 +1,6 @@
 use crate::cgi::run_cgi;
 use crate::config::{Config, Route, ServerConfig};
-use crate::handler::{handle_delete, handle_get, handle_post};
+use crate::handler::*;
 use crate::request::HttpRequest;
 use crate::request::HttpRequestBuilder;
 use crate::response::{HttpResponseBuilder, handle_method_not_allowed};
@@ -343,50 +343,56 @@ fn handle_read_state(
 
     let response_bytes = match selected_route {
         Some(route) => {
-            // Check if method is allowed
-            let request_method = &request.method;
-            let method_allowed = route
-                .methods
-                .iter()
-                .any(|m| HttpMethod::from_str(m) == *request_method);
-
-            if !method_allowed {
-                let allowed = &route.methods;
-
-                handle_method_not_allowed(&allowed, &selected_server)
+            // handle redirect
+            if let Some(redirect) = &route.redirect {
+                println!("Redirecting request for {} to {}", request.path, redirect);
+                HttpResponseBuilder::redirect(redirect).build()
             } else {
-                let file_path = resolve_file_path(selected_server, route, &request.path);
-                // check if file path is valid
-                let file_path = match file_path {
-                    Some(fp) => fp,
-                    None => "".to_string(), // Invalid path, will trigger 404
-                };
-                println!("Resolved file path: {}", file_path);
+                // Check if method is allowed
+                let request_method = &request.method;
+                let method_allowed = route
+                    .methods
+                    .iter()
+                    .any(|m| HttpMethod::from_str(m) == *request_method);
 
-                //CGI CHECK
-                if let Some(cgi_ext) = &route.cgi {
-                    if request.path.ends_with(cgi_ext) {
-                        println!("CGI detected for path: {}", request.path);
+                if !method_allowed {
+                    let allowed = &route.methods;
 
-                        let cgi_context = crate::cgi::CgiContext::from_request(request);
+                    handle_method_not_allowed(&allowed, &selected_server)
+                } else {
+                    let file_path = resolve_file_path(selected_server, route, &request.path);
+                    // check if file path is valid
+                    let file_path = match file_path {
+                        Some(fp) => fp,
+                        None => "".to_string(), // Invalid path, will trigger 404
+                    };
+                    println!("Resolved file path: {}", file_path);
 
-                        if run_cgi(route, cgi_context, &file_path, socket_data) {
-                            return Some(true);
-                        } else {
-                            return None;
+                    //CGI CHECK
+                    if let Some(cgi_ext) = &route.cgi {
+                        if request.path.ends_with(cgi_ext) {
+                            println!("CGI detected for path: {}", request.path);
+
+                            let cgi_context = crate::cgi::CgiContext::from_request(request);
+
+                            if run_cgi(route, cgi_context, &file_path, socket_data) {
+                                return Some(true);
+                            } else {
+                                return None;
+                            }
                         }
                     }
-                }
-                // Handle based on method
-                match request_method {
-                    HttpMethod::GET => handle_get(&file_path, &selected_server, &request),
-                    HttpMethod::POST => handle_post(&file_path, &request),
-                    HttpMethod::DELETE => {
-                        handle_delete(&file_path, &get_error_page_path(selected_server, 404))
-                    }
-                    HttpMethod::Other(_) => {
-                        let allowed = &route.methods;
-                        handle_method_not_allowed(&allowed, &selected_server)
+                    // Handle based on method
+                    match request_method {
+                        HttpMethod::GET => handle_get(&file_path, &selected_server, &request),
+                        HttpMethod::POST => handle_post(&file_path, &request),
+                        HttpMethod::DELETE => {
+                            handle_delete(&file_path, &get_error_page_path(selected_server, 404))
+                        }
+                        HttpMethod::Other(_) => {
+                            let allowed = &route.methods;
+                            handle_method_not_allowed(&allowed, &selected_server)
+                        }
                     }
                 }
             }

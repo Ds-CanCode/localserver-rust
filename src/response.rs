@@ -1,14 +1,6 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
-use crate::request::HttpRequest;
-use crate::{
-    config::{Route, ServerConfig},
-    request::HttpRequestBuilder,
-    server,
-    utils::HttpHeaders,
-};
+use crate::{config::ServerConfig, utils::HttpHeaders};
 
 pub struct HttpResponseBuilder {
     status_code: u16,
@@ -62,6 +54,10 @@ impl HttpResponseBuilder {
     }
     pub fn created() -> Self {
         Self::new(201, "Created")
+    }
+
+    pub fn redirect(location: &String) -> Self {
+        Self::new(302, "Found").header("Location", location)
     }
 
     pub fn not_found() -> Self {
@@ -193,7 +189,6 @@ fn detect_content_type(path: &str) -> &'static str {
 
 // === Handler functions for different HTTP methods ===
 
-
 pub fn handle_method_not_allowed(allowed_methods: &[String], server: &ServerConfig) -> Vec<u8> {
     let allow_header = allowed_methods.join(", ");
 
@@ -220,10 +215,10 @@ pub fn handle_method_not_allowed(allowed_methods: &[String], server: &ServerConf
     }
 }
 
-
-
-
-pub(crate) fn extract_multipart_files<'a>(body: &'a [u8], boundary: &str) -> Vec<(String, &'a [u8])> {
+pub(crate) fn extract_multipart_files<'a>(
+    body: &'a [u8],
+    boundary: &str,
+) -> Vec<(String, &'a [u8])> {
     let mut files = Vec::new();
 
     let boundary = format!("--{}", boundary);
@@ -310,14 +305,12 @@ fn extract_filename_from_disposition(part: &str) -> Option<String> {
     None
 }
 
-
 pub(crate) fn extract_boundary(content_type: &str) -> Option<String> {
     content_type
         .split(';')
         .find(|s| s.trim().starts_with("boundary="))
         .map(|s| s.trim().trim_start_matches("boundary=").to_string())
 }
-
 
 pub(crate) fn write_file(path: &str, data: &[u8]) -> Vec<u8> {
     if let Ok(s) = std::str::from_utf8(data) {
