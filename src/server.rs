@@ -674,7 +674,6 @@ impl Server {
     }
 
     fn check_timeouts(&mut self) {
-        println!("Checking for timed-out connections...");
         const TIMEOUT: Duration = Duration::from_secs(5);
         let now = Instant::now();
         let mut expired = Vec::new();
