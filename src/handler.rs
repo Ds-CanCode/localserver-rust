@@ -69,7 +69,7 @@ pub fn handle_get(
     }
 }
 
-pub fn handle_delete(file_path: &str, error_page_path: &str , cookie :&Cookie) -> Vec<u8> {
+pub fn handle_delete(file_path: &str, error_page_path: &str, cookie: &Cookie) -> Vec<u8> {
     match fs::remove_file(file_path) {
         Ok(_) => {
             println!("DELETE: Successfully deleted {}", file_path);
@@ -82,21 +82,17 @@ pub fn handle_delete(file_path: &str, error_page_path: &str , cookie :&Cookie) -
     }
 }
 
-pub fn handle_post(file_path: &str, request: &HttpRequest , cookie: &Cookie) -> Vec<u8> {
+pub fn handle_post(file_path: &str, request: &HttpRequest, cookie: &Cookie) -> Vec<u8> {
     let body = match &request.body {
         Some(b) => b,
         None => {
             return HttpResponseBuilder::bad_request()
                 .body(b"Empty body".to_vec())
+                .cookie(cookie)
                 .build();
         }
     };
 
-    if let Ok(s) = std::str::from_utf8(body) {
-        println!("body as string: {}", s);
-    } else {
-        println!("body is binary, cannot print as string");
-    }
     let content_type = match request.headers.get("content-type") {
         Some(v) => v,
         None => {
@@ -120,23 +116,13 @@ pub fn handle_post(file_path: &str, request: &HttpRequest , cookie: &Cookie) -> 
         let filename: String = {
             let last_segment = request.path.split('/').last().unwrap_or("");
 
-            if last_segment.contains('.') && !last_segment.is_empty() {
-                last_segment.to_string()
+            if !last_segment.is_empty() {
+                "".to_string()
             } else {
-                format!("upload_{}.{}", Uuid::new_v4(), b)
+                format!("/upload_{}.{}", Uuid::new_v4(), b)
             }
         };
-
-        println!(
-            "Direct upload filename: {}  and  save path is  {}",
-            filename, file_path
-        );
-
-        let save_path = if file_path.ends_with('/') {
-            format!("{}{}", file_path, filename)
-        } else {
-            format!("{}", file_path)
-        };
+        let save_path = format!("{}{}", file_path, filename);
 
         return write_file(&save_path, body, cookie);
     }
@@ -172,7 +158,7 @@ pub fn handle_post(file_path: &str, request: &HttpRequest , cookie: &Cookie) -> 
                 format!("{}/{}", file_path, filename)
             };
 
-            let response = write_file(&save_path, file_bytes , cookie);
+            let response = write_file(&save_path, file_bytes, cookie);
             // Check if write failed
             if response.starts_with(b"HTTP/1.1 500") || response.starts_with(b"HTTP/1.1 4") {
                 return response;
