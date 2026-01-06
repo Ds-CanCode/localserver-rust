@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Write};
 use std::net::Shutdown;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const LISTENER_TOKEN_START: usize = 0;
 const CONNECTION_TOKEN_START: usize = 10000;
@@ -328,18 +328,20 @@ fn resolve_file_path(
     }
 }
 
-fn read_request(stream: &mut TcpStream, request: &mut HttpRequestBuilder) -> Option<bool> {
+fn read_request(stream: &mut TcpStream, request: &mut SocketStatus) -> Option<bool> {
     let mut buf = [0u8; 2048];
+
     loop {
+        request.ttl = Instant::now();
         match stream.read(&mut buf) {
             Ok(0) => {
                 return None;
             }
             Ok(n) => {
-                if let Err(_e) = request.append(buf[..n].to_vec()) {
+                if let Err(_e) = request.request.append(buf[..n].to_vec()) {
                     return None;
                 }
-                if request.done() {
+                if request.request.done() {
                     return Some(true);
                 }
             }
@@ -353,10 +355,9 @@ fn read_request(stream: &mut TcpStream, request: &mut HttpRequestBuilder) -> Opt
     }
 }
 
-fn write_response(
-    stream: &mut TcpStream,
-    response: &mut Box<dyn HttpResponseCommon>,
-) -> Option<bool> {
+fn write_response(socket: &mut SocketData) -> Option<bool> {
+    let response: &mut Box<dyn HttpResponseCommon + 'static> = socket.status.response.as_mut()?;
+
     response.fill_if_needed().ok()?;
 
     let data = response.peek();
@@ -364,9 +365,12 @@ fn write_response(
     if data.is_empty() {
         return Some(true);
     }
-    match stream.write(data) {
+    match socket.stream.write(data) {
         Ok(n) => {
             response.next(n);
+            if n > 0 {
+                socket.status.ttl = Instant::now();
+            }
             if response.is_finished() {
                 Some(false)
             } else {
@@ -390,7 +394,7 @@ fn handle_read_state(
     socket_data: &mut SocketData,
     listener_info: Option<&ListenerInfo>,
 ) -> Option<bool> {
-    let read_result = read_request(&mut socket_data.stream, &mut socket_data.status.request);
+    let read_result = read_request(&mut socket_data.stream, &mut socket_data.status);
 
     match read_result {
         Some(true) => {}
@@ -407,12 +411,13 @@ fn handle_read_state(
     let info = listener_info.expect("No listener info available");
     let selected_server: &ServerConfig = select_server(info, hostname);
 
-
     let selected_route = find_matching_route(selected_server, &request.path);
 
     if let Some(route) = selected_route {
         if let Some(redirect) = &route.redirect {
-            let response_bytes = HttpResponseBuilder::redirect(redirect).cookie(&cookie).build();
+            let response_bytes = HttpResponseBuilder::redirect(redirect)
+                .cookie(&cookie)
+                .build();
             socket_data.status.response = Some(Box::new(SimpleResponse::new(response_bytes)));
         } else {
             let request_method = &request.method;
@@ -423,7 +428,7 @@ fn handle_read_state(
 
             if !method_allowed {
                 let allowed = &route.methods;
-                let response_bytes = handle_method_not_allowed(&allowed, &selected_server , &cookie);
+                let response_bytes = handle_method_not_allowed(&allowed, &selected_server, &cookie);
                 socket_data.status.response = Some(Box::new(SimpleResponse::new(response_bytes)));
             } else {
                 let file_path = resolve_file_path(selected_server, route, &request.path)
@@ -441,21 +446,20 @@ fn handle_read_state(
                 }
 
                 let response: Box<dyn HttpResponseCommon> = match request_method {
-                    HttpMethod::GET => {
-                        handle_get(&file_path, &selected_server, &request, &cookie)
-                    }
+                    HttpMethod::GET => handle_get(&file_path, &selected_server, &request, &cookie),
                     HttpMethod::POST => {
-                        let response_bytes = handle_post(&file_path, &request , &cookie);
+                        let response_bytes = handle_post(&file_path, &request, &cookie);
                         Box::new(SimpleResponse::new(response_bytes))
                     }
                     HttpMethod::DELETE => {
                         let error_path = get_error_page_path(selected_server, 404);
-                        let response_bytes = handle_delete(&file_path, &error_path , &cookie);
+                        let response_bytes = handle_delete(&file_path, &error_path, &cookie);
                         Box::new(SimpleResponse::new(response_bytes))
                     }
                     HttpMethod::Other(_) => {
                         let allowed = &route.methods;
-                        let response_bytes = handle_method_not_allowed(&allowed, &selected_server , &cookie);
+                        let response_bytes =
+                            handle_method_not_allowed(&allowed, &selected_server, &cookie);
                         Box::new(SimpleResponse::new(response_bytes))
                     }
                 };
@@ -465,7 +469,8 @@ fn handle_read_state(
         }
     } else {
         let error_path = get_error_page_path(selected_server, 404);
-        let response_bytes = HttpResponseBuilder::serve_error_page(&error_path, 404, "Not Found" , &cookie);
+        let response_bytes =
+            HttpResponseBuilder::serve_error_page(&error_path, 404, "Not Found", &cookie);
         socket_data.status.response = Some(Box::new(SimpleResponse::new(response_bytes)));
     }
 
@@ -474,9 +479,7 @@ fn handle_read_state(
 }
 
 fn handle_write_state(socket_data: &mut SocketData) -> Option<bool> {
-    let response = socket_data.status.response.as_mut()?;
-
-    let write_result = write_response(&mut socket_data.stream, response);
+    let write_result = write_response(socket_data);
 
     match write_result {
         Some(true) => {}
@@ -484,6 +487,7 @@ fn handle_write_state(socket_data: &mut SocketData) -> Option<bool> {
             return other;
         }
     }
+    let response = socket_data.status.response.as_ref()?;
 
     if !response.is_finished() {
         println!("Response not finished yet.");
@@ -579,7 +583,10 @@ impl Server {
         }
 
         loop {
-            self.poll.poll(&mut self.events, None)?;
+            self.check_timeouts();
+            let timeout = Some(Duration::from_millis(100)); // wait max 100ms
+
+            self.poll.poll(&mut self.events, timeout)?;
 
             for event in self.events.iter() {
                 let token = event.token();
@@ -663,6 +670,26 @@ impl Server {
             Status::Read => handle_read_state(socket_data, listener_info),
             Status::Write => handle_write_state(socket_data),
             Status::Finish => None,
+        }
+    }
+
+    fn check_timeouts(&mut self) {
+        println!("Checking for timed-out connections...");
+        const TIMEOUT: Duration = Duration::from_secs(5);
+        let now = Instant::now();
+        let mut expired = Vec::new();
+
+        for (token, conn) in &self.connections {
+            if now.duration_since(conn.status.ttl) > TIMEOUT {
+                expired.push(*token);
+            }
+        }
+
+        for token in expired {
+            if let Some(mut conn) = self.connections.remove(&token) {
+                let _ = self.poll.registry().deregister(&mut conn.stream);
+                let _ = conn.stream.shutdown(Shutdown::Both);
+            }
         }
     }
 }
