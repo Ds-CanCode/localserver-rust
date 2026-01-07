@@ -1,6 +1,5 @@
-
-use crate::utils::{HttpHeaders, HttpMethod};
 use crate::utils::cookie::extract_session_id;
+use crate::utils::{HttpHeaders, HttpMethod};
 
 #[derive(Debug, Clone)]
 pub struct HttpRequest {
@@ -68,6 +67,22 @@ impl HttpRequestBuilder {
         Ok(())
     }
 
+    pub fn body_len(&self) -> usize {
+        match &self.state {
+            ParserState::ParsingBody { headers_end, .. } => {
+                self.buffer.len().saturating_sub(*headers_end)
+            }
+            ParserState::Complete => {
+                if let Some(req) = &self.request {
+                    req.body.as_ref().map(|b| b.len()).unwrap_or(0)
+                } else {
+                    0
+                }
+            }
+            _ => 0,
+        }
+    }
+
     fn find_headers_end(&self) -> Option<usize> {
         if let Some(pos) = self.buffer.windows(4).position(|w| w == b"\r\n\r\n") {
             return Some(pos + 4);
@@ -111,7 +126,7 @@ impl HttpRequestBuilder {
                 headers.insert(key, val);
             }
         }
-        
+
         // Add keep-alive by default if not specified
         if !headers.get("connection").is_some() {
             headers.insert("connection", "keep-alive");
@@ -122,7 +137,7 @@ impl HttpRequestBuilder {
         let session_id = extract_session_id(cookie_header);
 
         let body_type = self.determine_body_type(&headers);
-        
+
         // Parse path and query string
         let (path, query_string) = Self::parse_path_and_query(parts[1]);
 
@@ -250,6 +265,13 @@ impl HttpRequestBuilder {
         matches!(self.state, ParserState::Complete)
     }
 
+    pub fn header_done(&self) -> bool {
+        matches!(self.state, ParserState::ParsingBody { .. })
+    }
+    pub fn get_before_done(&self) -> Option<&HttpRequest> {
+        self.request.as_ref()
+    }
+
     pub fn get(&self) -> Option<&HttpRequest> {
         if self.done() {
             self.request.as_ref()
@@ -271,10 +293,10 @@ impl HttpRequest {
                 let mut parts = pair.splitn(2, '=');
                 let key = parts.next()?.to_string();
                 let value = parts.next().unwrap_or("").to_string();
-                
+
                 let key = Self::url_decode(&key);
                 let value = Self::url_decode(&value);
-                
+
                 Some((key, value))
             })
             .collect()

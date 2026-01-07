@@ -66,14 +66,16 @@ pub struct FileResponse {
 }
 
 impl FileResponse {
-    pub fn new(file_path: &str) -> io::Result<Self> {
+    pub fn new(file_path: &str, cookie: &Cookie) -> io::Result<Self> {
         let content_type = detect_content_type(file_path);
         let file = File::open(file_path)?;
         let metadata = file.metadata()?;
+
         let headers = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\nSet-Cookie: {}\r\n\r\n",
             metadata.len(),
-            content_type
+            content_type,
+            cookie.to_header_value()
         )
         .into_bytes();
 
@@ -147,6 +149,9 @@ pub struct SocketStatus {
     pub status: Status,
     pub request: HttpRequestBuilder,
     pub response: Option<Box<dyn HttpResponseCommon>>,
+    pub server_selected: bool,
+    pub body_too_large: bool,
+    pub max_body_size: Option<usize>,
 }
 
 pub struct SocketData {
@@ -190,37 +195,6 @@ fn build_http_response(
     .into_bytes();
     headers.extend_from_slice(&content);
     headers
-}
-
-fn build_404_response(error_page_path: &str) -> Vec<u8> {
-    match fs::read(error_page_path) {
-        Ok(content) => {
-            println!("Serving custom 404 error page from: {}", error_page_path);
-            build_http_response(404, "Not Found", content, "text/html")
-        }
-        Err(e) => {
-            println!(
-                "Error page '{}' not found, sending minimal 404 response. [Error: {:?}]",
-                error_page_path, e
-            );
-            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec()
-        }
-    }
-}
-
-fn serve_file_or_404(file_path: &str, error_page_path: &str) -> Vec<u8> {
-    println!("Attempting to serve file: {}", file_path);
-
-    match fs::read(file_path) {
-        Ok(content) => {
-            println!("File found, serving 200 OK");
-            build_http_response(200, "OK", content, "text/html")
-        }
-        Err(_) => {
-            println!("File not found: {}, serving 404 page", file_path);
-            build_404_response(error_page_path)
-        }
-    }
 }
 
 fn extract_hostname(headers: &HttpHeaders) -> &str {
@@ -328,29 +302,49 @@ fn resolve_file_path(
     }
 }
 
-fn read_request(stream: &mut TcpStream, request: &mut SocketStatus) -> Option<bool> {
+fn read_request(
+    stream: &mut TcpStream,
+    socket: &mut SocketStatus,
+    listener_info: Option<&ListenerInfo>,
+) -> Option<bool> {
     let mut buf = [0u8; 2048];
 
     loop {
-        request.ttl = Instant::now();
+        socket.ttl = Instant::now();
+
         match stream.read(&mut buf) {
-            Ok(0) => {
-                return None;
-            }
+            Ok(0) => return None,
+
             Ok(n) => {
-                if let Err(_e) = request.request.append(buf[..n].to_vec()) {
-                    return None;
+                socket.request.append(buf[..n].to_vec()).ok()?;
+
+                if socket.request.header_done() && !socket.server_selected {
+                    let request = socket.request.get_before_done()?;
+                    let hostname = extract_hostname(&request.headers);
+                    let info = listener_info?;
+
+                    let selected = select_server(info, hostname);
+                    socket.max_body_size = Some(selected.client_max_body_size);
+                    socket.server_selected = true;
                 }
-                if request.request.done() {
+
+                if let Some(max) = socket.max_body_size {
+                    if socket.request.body_len() > max {
+                        socket.body_too_large = true;
+                        return None;
+                    }
+                }
+
+                if socket.request.done() {
                     return Some(true);
                 }
             }
+
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 return Some(false);
             }
-            Err(_) => {
-                return None;
-            }
+
+            Err(_) => return None,
         }
     }
 }
@@ -394,7 +388,11 @@ fn handle_read_state(
     socket_data: &mut SocketData,
     listener_info: Option<&ListenerInfo>,
 ) -> Option<bool> {
-    let read_result = read_request(&mut socket_data.stream, &mut socket_data.status);
+    let read_result = read_request(
+        &mut socket_data.stream,
+        &mut socket_data.status,
+        listener_info,
+    );
 
     match read_result {
         Some(true) => {}
@@ -410,6 +408,7 @@ fn handle_read_state(
     let hostname = extract_hostname(&request.headers);
     let info = listener_info.expect("No listener info available");
     let selected_server: &ServerConfig = select_server(info, hostname);
+    // check if the body is bigger than
 
     let selected_route = find_matching_route(selected_server, &request.path);
 
@@ -617,6 +616,9 @@ impl Server {
                                                 status: Status::Read,
                                                 request: HttpRequestBuilder::new(),
                                                 response: None,
+                                                server_selected: false,
+                                                max_body_size: None,
+                                                body_too_large: false,
                                             },
                                             listener_token: token,
                                             session_store: self.session_store.clone(),

@@ -15,7 +15,6 @@ pub fn handle_get(
     request: &HttpRequest,
     cookie: &Cookie,
 ) -> Box<dyn HttpResponseCommon> {
-    // Trim request path from leading/trailing '/'
     let path = request.path.trim_matches('/');
 
     if let Some(route) = server
@@ -23,7 +22,6 @@ pub fn handle_get(
         .iter()
         .find(|r| r.path.trim_matches('/') == path)
     {
-        // Directory listing allowed?
         if route.list_directory == Some(true) {
             let content = HttpResponseBuilder::serve_directory_listing(
                 &server.root,
@@ -34,37 +32,37 @@ pub fn handle_get(
             return Box::new(SimpleResponse::new(content));
         }
 
-        // Default file exists? Serve it
         if let Some(default_file) = &route.default_file {
             let (key, value) = cookie.to_header_pair();
+            let full_path = format!("{}/{}/{}", server.root, route.root, default_file);
 
-            let server_root = &server.root;
-            let root = &route.root;
-            let full_path = format!("{}/{}/{}", server_root, root, default_file);
-            match FileResponse::new(&full_path) {
-                Ok(file_response) => {
-                    return Box::new(file_response);
-                }
+            return match FileResponse::new(&full_path , cookie) {
+                Ok(fr) => Box::new(fr),
                 Err(_) => {
-                    return Box::new(SimpleResponse::new(
-                        HttpResponseBuilder::not_found()
-                            .header(&key, &value)
-                            .build(),
-                    ));
+                    let not_found = get_error_page_path(server, 404);
+                    match FileResponse::new(&not_found , cookie) {
+                        Ok(fr) => Box::new(fr),
+                        Err(_) => Box::new(SimpleResponse::new(
+                            HttpResponseBuilder::not_found().build(),
+                        )),
+                    }
                 }
-            }
+            };
         }
     }
 
-    // If no route/default file, serve requested file directly
-    match FileResponse::new(&request_path) {
-        Ok(file_response) => {
-            return Box::new(file_response);
-        }
+    // Fallback: try to serve requested file
+    let (key, value) = cookie.to_header_pair();
+    match FileResponse::new(&request_path , cookie) {
+        Ok(fr) => Box::new(fr),
         Err(_) => {
-            return Box::new(SimpleResponse::new(
-                HttpResponseBuilder::not_found().build(),
-            ));
+            let not_found = get_error_page_path(server, 404);
+            match FileResponse::new(&not_found , cookie) {
+                Ok(fr) => Box::new(fr),
+                Err(_) => Box::new(SimpleResponse::new(
+                    HttpResponseBuilder::not_found().cookie(cookie).build(),
+                )),
+            }
         }
     }
 }
