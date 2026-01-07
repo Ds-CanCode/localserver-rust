@@ -1,7 +1,7 @@
 use crate::utils::cookie::extract_session_id;
 use crate::utils::{HttpHeaders, HttpMethod};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
@@ -9,10 +9,10 @@ pub struct HttpRequest {
     pub version: String,
     pub headers: HttpHeaders,
     pub body: Option<Vec<u8>>,
-    pub session_id: Option<String>, // Store session ID
+    pub session_id: Option<String>, 
 }
 
-#[derive(Debug)]
+
 pub enum ParserState {
     ParsingHeaders,
     ParsingBody {
@@ -22,8 +22,8 @@ pub enum ParserState {
     Complete,
 }
 
-#[derive(Debug)]
-enum BodyType {
+
+pub enum BodyType {
     ContentLength(usize),
     Chunked {
         bytes_read: usize,
@@ -33,7 +33,7 @@ enum BodyType {
     None,
 }
 
-#[derive(Debug)]
+
 pub struct HttpRequestBuilder {
     buffer: Vec<u8>,
     state: ParserState,
@@ -82,7 +82,7 @@ impl HttpRequestBuilder {
             _ => 0,
         }
     }
-    pub fn setState(&mut self, state: ParserState) {
+    pub fn set_state(&mut self, state: ParserState) {
         self.state = state;
     }
 

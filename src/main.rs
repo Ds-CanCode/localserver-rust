@@ -7,6 +7,9 @@ pub mod server;
 pub mod utils;
 pub(crate) mod response;
 pub mod handler;
+pub mod models;
+pub mod read;
+pub mod write;
 
 use server::Server;
 

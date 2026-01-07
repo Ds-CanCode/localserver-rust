@@ -1,10 +1,10 @@
 use crate::error::get_error_page_path;
-use crate::utils::cookie::{self, Cookie};
+use crate::models::{FileResponse, HttpResponseCommon, SimpleResponse};
+use crate::utils::cookie::{ Cookie};
 use crate::{
     config::ServerConfig,
     request::HttpRequest,
     response::{HttpResponseBuilder, extract_boundary, extract_multipart_files, write_file},
-    server::{FileResponse, HttpResponseCommon, SimpleResponse},
 };
 use std::fs;
 use uuid::Uuid;
@@ -33,7 +33,7 @@ pub fn handle_get(
         }
 
         if let Some(default_file) = &route.default_file {
-            let (key, value) = cookie.to_header_pair();
+            let (_key, _value) = cookie.to_header_pair();
             let full_path = format!("{}/{}/{}", server.root, route.root, default_file);
 
             return match FileResponse::new(&full_path , cookie) {
@@ -52,7 +52,7 @@ pub fn handle_get(
     }
 
     // Fallback: try to serve requested file
-    let (key, value) = cookie.to_header_pair();
+    let (_key, _value) = cookie.to_header_pair();
     match FileResponse::new(&request_path , cookie) {
         Ok(fr) => Box::new(fr),
         Err(_) => {

@@ -60,7 +60,7 @@ fn parse_ports(lines: &[String], start: usize) -> Result<(Vec<u16>, usize), Box<
         }
     }
 
-    if ports.is_empty() {
+    if ports.is_empty() {#[warn(unused_variables)]
         return Err("ports must contain at least one value".into());
     }
 
@@ -133,7 +133,7 @@ fn parse_route(lines: &[String], start: usize) -> Result<(Route, usize), Box<dyn
         i += 1;
     }
 
-    // Validation: path and methods are required
+    // Validation: path and methods are required#[warn(unused_variables)]
     if route.path.is_empty() {
         return Err("Route missing 'path'".into());
     }

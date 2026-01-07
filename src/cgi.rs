@@ -1,9 +1,5 @@
 use crate::{
-    config::Route,
-    request::HttpRequest,
-    response::HttpResponseBuilder,
-    server::{SimpleResponse, SocketData, Status},
-    utils::HttpHeaders,
+    config::Route, models::SimpleResponse, request::HttpRequest, response::HttpResponseBuilder, server::{SocketData, Status}, utils::HttpHeaders
 };
 use std::io::Write;
 use std::process::{Command, Stdio};

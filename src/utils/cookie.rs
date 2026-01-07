@@ -211,7 +211,7 @@ impl Cookie {
     pub fn is_expired(&self) -> bool {
         if let Some(expires) = &self.expires {
             SystemTime::now() >= *expires
-        } else if let Some(max_age) = &self.max_age {
+        } else if let Some(_max_age) = &self.max_age {
             // For simplicity, we assume max_age was set relative to creation time
             // In a real implementation, you'd need to track creation time
             // Note: max_age is just a Duration, not tied to when the cookie was set

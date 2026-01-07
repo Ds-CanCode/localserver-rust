@@ -2,7 +2,7 @@ use std::fs;
 
 use crate::{
     config::ServerConfig,
-    utils::{HttpHeaders, cookie::{self, Cookie}},
+    utils::{HttpHeaders, cookie::{Cookie}},
 };
 
 pub struct HttpResponseBuilder {
@@ -37,12 +37,6 @@ impl HttpResponseBuilder {
     // Add a cookie
     pub fn cookie(mut self, cookie: &Cookie) -> Self {
         self.cookies.push(cookie.clone());
-        self
-    }
-
-    // Add multiple cookies if you want
-    pub fn cookies(mut self, cookies: Vec<Cookie>) -> Self {
-        self.cookies.extend(cookies);
         self
     }
 
@@ -136,7 +130,7 @@ impl HttpResponseBuilder {
 
         listing.push_str("</ul></body></html>");
 
-        let (key, value) = cookie.to_header_pair();
+        let (_key, _value) = cookie.to_header_pair();
 
         Self::ok()
             .body(listing.into_bytes().to_vec())
@@ -144,17 +138,7 @@ impl HttpResponseBuilder {
             .build()
     }
 
-    /// Serve a file with automatic content-type detection
-    pub fn serve_file(path: &str, cookie :&Cookie) -> Result<Vec<u8>, std::io::Error> {
-        let content = fs::read(path)?;
-        let content_type = detect_content_type(path);
 
-        Ok(Self::ok()
-            .header("Content-Type", content_type)
-            .body(content)
-            .cookie(cookie)
-            .build())
-    }
 
     /// Serve a custom error page or fall back to minimal response
     pub fn serve_error_page(error_page_path: &str, status_code: u16, status_text: &str , cookie :&Cookie   ) -> Vec<u8> {
@@ -180,21 +164,7 @@ impl HttpResponseBuilder {
         }
     }
 
-    /// Try to serve a file, or serve 404 error page on failure
-    pub fn serve_file_or_404(file_path: &str, error_page_path: &str, cookie: &Cookie) -> Vec<u8> {
-        println!("Attempting to serve file: {}", file_path);
 
-        match Self::serve_file(file_path , cookie) {
-            Ok(response) => {
-                println!("File found, serving 200 OK");
-                response
-            }
-            Err(_) => {
-                println!("File not found: {}, serving 404 page", file_path);
-                Self::serve_error_page(error_page_path, 404, "Not Found", cookie)
-            }
-        }
-    }
 }
 
 // Helper function to detect content type from file extension
