@@ -1,21 +1,18 @@
-
 use crate::config::{Config, ServerConfig};
-use crate::models::{HttpResponseCommon};
+use crate::models::HttpResponseCommon;
+use crate::read::handle_read_state;
 use crate::request::HttpRequestBuilder;
-use crate::utils::session::{SessionStore};
+use crate::utils::session::SessionStore;
+use crate::write::handle_write_state;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::Shutdown;
 use std::time::{Duration, Instant};
-use crate::read::handle_read_state;
-use crate::write::handle_write_state;
 
 const LISTENER_TOKEN_START: usize = 0;
 const CONNECTION_TOKEN_START: usize = 10000;
-
-
 
 #[derive(PartialEq, Debug)]
 pub enum Status {
@@ -38,7 +35,7 @@ pub struct SocketData {
     pub stream: TcpStream,
     pub status: SocketStatus,
     pub listener_token: Token,
-    pub session_store: SessionStore, 
+    pub session_store: SessionStore,
 }
 
 pub struct ListenerInfo {
@@ -57,7 +54,6 @@ pub struct Server {
     session_store: SessionStore,
     next_token: usize,
 }
-
 
 impl Server {
     pub fn new() -> io::Result<Self> {
@@ -131,6 +127,7 @@ impl Server {
         }
 
         loop {
+            self.session_store.cleanup();
             self.check_timeouts();
             let timeout = Some(Duration::from_millis(100)); // wait max 100ms
 
