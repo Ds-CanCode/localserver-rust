@@ -13,7 +13,7 @@ pub struct HttpRequest {
 }
 
 #[derive(Debug)]
-enum ParserState {
+pub enum ParserState {
     ParsingHeaders,
     ParsingBody {
         headers_end: usize,
@@ -81,6 +81,9 @@ impl HttpRequestBuilder {
             }
             _ => 0,
         }
+    }
+    pub fn setState(&mut self, state: ParserState) {
+        self.state = state;
     }
 
     fn find_headers_end(&self) -> Option<usize> {
@@ -267,6 +270,7 @@ impl HttpRequestBuilder {
 
     pub fn header_done(&self) -> bool {
         matches!(self.state, ParserState::ParsingBody { .. })
+            || matches!(self.state, ParserState::Complete)
     }
     pub fn get_before_done(&self) -> Option<&HttpRequest> {
         self.request.as_ref()

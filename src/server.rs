@@ -1,7 +1,7 @@
 use crate::cgi::run_cgi;
 use crate::config::{Config, Route, ServerConfig};
 use crate::handler::*;
-use crate::request::HttpRequest;
+use crate::request::{HttpRequest, ParserState};
 use crate::request::HttpRequestBuilder;
 use crate::response::{HttpResponseBuilder, detect_content_type, handle_method_not_allowed};
 use crate::router::Router;
@@ -307,7 +307,7 @@ fn read_request(
     socket: &mut SocketStatus,
     listener_info: Option<&ListenerInfo>,
 ) -> Option<bool> {
-    let mut buf = [0u8; 2048];
+    let mut buf = [0u8; 4096];
 
     loop {
         socket.ttl = Instant::now();
@@ -319,6 +319,7 @@ fn read_request(
                 socket.request.append(buf[..n].to_vec()).ok()?;
 
                 if socket.request.header_done() && !socket.server_selected {
+                    println!("hello");
                     let request = socket.request.get_before_done()?;
                     let hostname = extract_hostname(&request.headers);
                     let info = listener_info?;
@@ -331,7 +332,8 @@ fn read_request(
                 if let Some(max) = socket.max_body_size {
                     if socket.request.body_len() > max {
                         socket.body_too_large = true;
-                        return None;
+                        socket.request.setState(ParserState::Complete);
+                        return Some(true);
                     }
                 }
 
@@ -408,7 +410,25 @@ fn handle_read_state(
     let hostname = extract_hostname(&request.headers);
     let info = listener_info.expect("No listener info available");
     let selected_server: &ServerConfig = select_server(info, hostname);
-    // check if the body is bigger than
+
+    // check if the socket says body too large
+    match socket_data.status.body_too_large {
+        true => {
+            println!(" too large qflksqdjflmqsdkjflqmskdfjlqskdjf");
+            // Body is too large → return 413 Payload Too Large
+            let response = HttpResponseBuilder::new(413, "Payload Too Large")
+                .body(b"Request body too large".to_vec())
+                .build();
+            socket_data.status.response = Some(Box::new(SimpleResponse::new(response)));
+            socket_data.status.status = Status::Write;
+
+            return Some(true);
+        }
+        false => {
+            println!("false false false ")
+            // Body size is fine → continue processing
+        }
+    }
 
     let selected_route = find_matching_route(selected_server, &request.path);
 

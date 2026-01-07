@@ -6,7 +6,7 @@ servers:
       - 8081
     default_server: true
     root: "./public"
-    client_max_body_size: 5000000
+    client_max_body_size: 100000
     error_pages:
       404: "./error_pages/404.html"
       500: "./error_pages/500.html"
